@@ -94,6 +94,23 @@ def tighten(polygon, frame: Frame, gray: np.ndarray, mask_cfg: dict) -> list[lis
     return [list(map(float, p)) for p in result]
 
 
+def cut_top_valley(quad, frame: Frame, gray: np.ndarray, mask_cfg: dict) -> list:
+    """枠の上側で谷を探して切る。氏名の上にある別のインク（読めなかった地番など）を塗らない（§15.2）。"""
+    u_range = project_interval(quad, frame.center, frame.u)
+    v_range = project_interval(quad, frame.center, frame.v)
+    rows = sample_ink(gray, frame.center, frame.u, frame.v, u_range, v_range, mask_cfg["ink_threshold"]).sum(axis=1)
+    end = max(1, int(len(rows) * mask_cfg["top_valley_ratio"]))
+    inked = np.flatnonzero(rows[:end])
+    if not inked.size or inked[0] + 1 >= end:  # 探す範囲に、上にインクがある行がない
+        return quad
+    first_ink = int(inked[0]) + 1  # 枠の上の余白ではなく、最初のインクより下の谷を探す
+    valley = first_ink + _middle_of_longest_minimum_run(rows[first_ink:end])
+    if rows[valley] > rows.max() * mask_cfg["top_valley_max_ink_ratio"]:
+        return quad
+    cut = clip_below_line(quad, frame.center + frame.v * (v_range[0] + valley + 0.5), frame.v)
+    return cut if len(cut) >= MIN_POLYGON_VERTICES else quad
+
+
 def _core_rows(rows: np.ndarray, max_ratio: float) -> tuple[int, int] | None:
     """枠の中央を含むインクのかたまりの行の範囲。氏名の上端など、別のかたまりを外す。"""
     inked = np.flatnonzero(rows)
@@ -157,3 +174,9 @@ def refine_pair(pair: Pair, gray: np.ndarray, mask_cfg: dict, frame_of: Callable
 
 def refine_unpaired(quad, gray: np.ndarray, mask_cfg: dict, frame_of: Callable = quad_frame) -> list[list[float]]:
     return tighten(quad, frame_of(quad), gray, mask_cfg)
+
+
+def refine_lone_text(quad, gray: np.ndarray, mask_cfg: dict, frame_of: Callable = quad_frame) -> list[list[float]]:
+    """地番とペアにならなかった文字の塗り。上側を切ってから詰める。"""
+    frame = frame_of(quad)
+    return tighten(cut_top_valley(quad, frame, gray, mask_cfg), frame, gray, mask_cfg)

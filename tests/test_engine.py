@@ -18,7 +18,7 @@ from kurokofude.geometry import FrameResolver, angle_difference_deg, quad_frame
 from kurokofude.mixed import resolve_mixed
 from kurokofude.mask import fill_polygons, protected_area, subtract_protected, write_outputs
 from kurokofude.pair import Pair, pair_names
-from kurokofude.refine import cut_offset, refine_pair, tight_box, tighten
+from kurokofude.refine import cut_offset, refine_lone_text, refine_pair, tight_box, tighten
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = load_config()
@@ -317,6 +317,34 @@ def test_tight_box_never_grows_and_keeps_box_without_ink():
     draw_ink(gray, [[100, 100], [300, 100], [300, 200], [100, 200]])  # 枠より広いインク
     result = np.array(tight_box(box_quad, quad_frame(box_quad), gray, CONFIG["mask"]))
     assert result[:, 0].min() >= 160 and result[:, 0].max() <= 240
+
+
+def test_lone_text_is_cut_below_unread_chiban_above_it():
+    """読めなかった地番のインクが枠の上側にあれば、谷で切って塗らない（§15.2）。"""
+    gray = blank_gray()
+    draw_ink(gray, [[190, 132], [210, 132], [210, 140], [190, 140]])  # 読めなかった1桁の地番の下端
+    draw_ink(gray, [[170, 146], [230, 146], [230, 170], [170, 170]])  # 氏名
+    box_quad = [[160.0, 130.0], [240.0, 130.0], [240.0, 172.0], [160.0, 172.0]]
+    result = np.array(refine_lone_text(box_quad, gray, CONFIG["mask"]))
+    assert 140 <= result[:, 1].min() <= 146
+    assert result[:, 1].max() >= 170
+
+
+def test_lone_text_without_ink_above_valley_is_only_tightened():
+    gray = blank_gray()
+    draw_ink(gray, [[170, 146], [230, 146], [230, 170], [170, 170]])
+    box_quad = [[160.0, 130.0], [240.0, 130.0], [240.0, 172.0], [160.0, 172.0]]
+    result = np.array(refine_lone_text(box_quad, gray, CONFIG["mask"]))
+    assert result[:, 1].min() == pytest.approx(143, abs=1.5)
+
+
+def test_lone_text_keeps_top_when_a_line_fills_every_row():
+    """筆界線が縦に貫いて谷がなければ切らない。"""
+    gray = blank_gray()
+    draw_ink(gray, [[170, 134], [230, 134], [230, 170], [170, 170]])
+    box_quad = [[160.0, 130.0], [240.0, 130.0], [240.0, 172.0], [160.0, 172.0]]
+    result = np.array(refine_lone_text(box_quad, gray, CONFIG["mask"]))
+    assert result[:, 1].min() == pytest.approx(131, abs=1.5)
 
 
 def test_refine_pair_does_not_paint_chiban_ink():

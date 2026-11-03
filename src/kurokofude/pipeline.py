@@ -14,7 +14,7 @@ from .mask import write_outputs
 from .mixed import resolve_mixed
 from .ocr import read_image_for_ocr, run_ocr
 from .pair import pair_names
-from .refine import refine_pair, refine_unpaired, tight_box
+from .refine import refine_lone_text, refine_pair, refine_unpaired, tight_box
 
 
 @dataclass
@@ -44,7 +44,7 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
     paired_ids = {id(pair.source) for pair in pairs}
     unpaired = (
         [
-            refine_unpaired(box["quad"], gray, config["mask"], frame_of)
+            refine_lone_text(box["quad"], gray, config["mask"], frame_of)
             for box in classified.text
             if id(box) not in paired_ids
         ]

@@ -34,6 +34,12 @@ kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図
 
 図枠の下辺ぜんぶが表題欄の図面（河川境界確定図など）では、`--config configs/bottom_strip.yaml` を付けてください。
 
+## 既知の制約
+
+- 1桁の地番は検出されにくく、地番と分からないまま塗られることがあります。確認画面での確認が必要です
+- OCR が文字として検出しなかった部分は塗られません。確認画面で人が足してください
+- 塗り漏れがゼロになるとは限りません。AI に渡す前に確認画面で確かめてください
+
 ## 関所について
 
 塗る前の図面を Claude に渡さないための守りは3層です。MCP の設計（生データを返さない）、フック（`.claude/hooks/guard_raw.py`）、Claude Code 本体の deny 設定（`.claude/settings.json`）です。
