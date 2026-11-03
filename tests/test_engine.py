@@ -40,10 +40,35 @@ def box(quad, text=""):
 
 
 @pytest.mark.parametrize(
-    "raw,expected", [("１２３－４", "123-4"), ("l2O", "120"), ("273ー9", "273-9"), ("12 3", "123")]
+    "ocr_text,expected",
+    [
+        ("１２３－４", "123-4"),
+        ("l2O", "120"),
+        ("273ー9", "273-9"),
+        ("12 3", "123"),
+        ("273/9", "273-9"),
+        ("273\\9", "273-9"),
+        ("273|9", "273-9"),
+        ("273ノ9", "273-9"),
+        ("273‐9", "273-9"),
+        ("3-", "3"),
+        (".12:", "12"),
+        ("S=1:500", "S=1:500"),
+        ("273□", "273□"),
+    ],
 )
-def test_normalize_text(raw, expected):
-    assert normalize_text(raw) == expected
+def test_normalize_text(ocr_text, expected):
+    assert normalize_text(ocr_text) == expected
+
+
+def test_normalized_chiban_gets_lower_score():
+    clean = box(rect(100, 100, 60, 20), "273-9")
+    fixed = box(rect(300, 100, 60, 20), "273/9")
+    wide = box(rect(500, 100, 60, 20), "２７３－９")
+    result = classify_boxes([clean, fixed, wide], IMAGE_SIZE, CONFIG)
+    factor = CONFIG["chiban"]["normalized_score_factor"]
+    assert [b["score"] for b in result.chiban] == pytest.approx([0.9, 0.9 * factor, 0.9])
+    assert [b["text"] for b in result.chiban] == ["273-9"] * 3
 
 
 def test_classify_splits_into_three_kinds():

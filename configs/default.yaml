@@ -13,6 +13,7 @@ chiban:
   max_digits: 5
   decoy_pattern: '[:：=]'      # 近くにこれがあれば縮尺などとみなす
   decoy_neighbor_distance: 3.0  # 地番の高さの倍数
+  normalized_score_factor: 0.8  # 正規化で地番になったものの score に掛ける
 exclude_regions:        # 画像に対する相対座標 [x0, y0, x1, y1]
   - [0.6, 0.8, 1.0, 1.0]   # 右下の表題欄
 pair:

@@ -15,7 +15,12 @@ from .geometry import quad_frame
 from .ocr import digit_ratio
 
 # OCR の読み違いのうち、数字に戻してよいもの
-CHAR_FIXES = str.maketrans({"O": "0", "o": "0", "l": "1", "I": "1", "ー": "-", "−": "-", "–": "-", "—": "-"})
+DIGIT_FIXES = {"O": "0", "o": "0", "l": "1", "I": "1"}
+# 地番の枝番の区切りに読み違えやすいもの（§11.4）
+HYPHEN_LIKE = "/\\|ｰ－‐ー−–—ノ"
+CHAR_FIXES = str.maketrans({**DIGIT_FIXES, **{c: "-" for c in HYPHEN_LIKE}})
+# 先頭・末尾の記号ノイズ。英数字と、読めなかった文字の □ は記号として扱わない
+EDGE_NOISE = re.compile(r"^[^0-9A-Za-z□]+|[^0-9A-Za-z□]+$")
 
 
 @dataclass
@@ -25,8 +30,12 @@ class Classified:
     text: list[dict]  # (c) それ以外。塗る
 
 
+def _plain(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).replace(" ", "")
+
+
 def normalize_text(text: str) -> str:
-    return unicodedata.normalize("NFKC", text).translate(CHAR_FIXES).replace(" ", "")
+    return EDGE_NOISE.sub("", _plain(text).translate(CHAR_FIXES))
 
 
 def is_chiban_text(text: str, chiban_cfg: dict) -> bool:
@@ -62,7 +71,10 @@ def classify_boxes(boxes: list[dict], image_size: tuple[int, int], config: dict)
             continue
         text = normalize_text(box["text"])
         if is_chiban_text(text, chiban_cfg) and not has_decoy_neighbor(box, boxes, chiban_cfg):
-            result.chiban.append({**box, "text": text})
+            # 読み直して地番になったものは信頼度を下げる（④の照合で使う）
+            changed = text != _plain(box["text"])
+            score = box["score"] * chiban_cfg["normalized_score_factor"] if changed else box["score"]
+            result.chiban.append({**box, "text": text, "score": score})
         elif digit_ratio(text) >= config["ocr"]["digit_ratio_min"]:
             result.uncertain.append({**box, "text": text})
         else:
