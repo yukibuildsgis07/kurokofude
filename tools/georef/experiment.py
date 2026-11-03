@@ -62,7 +62,7 @@ def shifted(truth: np.ndarray, size: list[int]) -> np.ndarray:
     return np.array([linear[0, 0], linear[1, 0], linear[0, 1], linear[1, 1], offset[0], offset[1]])
 
 
-def run(name: str, config: dict) -> dict:
+def run(name: str, config: dict, no_frame: bool = False) -> dict:
     chiban_path = MASKED / f"{name}.chiban.json"
     chiban_json = json.loads(chiban_path.read_text(encoding="utf-8"))
     size = chiban_json["image_size"]
@@ -71,7 +71,9 @@ def run(name: str, config: dict) -> dict:
     write_world_file(MASKED / f"{name}.tfw", list(start))
     before = position_error(start, truth, size)
 
-    report = georeference(chiban_json, json.loads((REF / f"{name}.geojson").read_text(encoding="utf-8")), config)
+    truth_json = json.loads((TRUTH / f"{name}.truth.json").read_text(encoding="utf-8"))
+    frame = None if no_frame else truth_json.get("frame_quad")
+    report = georeference(chiban_json, json.loads((REF / f"{name}.geojson").read_text(encoding="utf-8")), config, frame)
     row = {"name": name, "before_rms_m": round(before[0], 2), "before_max_m": round(before[1], 2)}
     if report["status"] != "ok":
         return {**row, "status": report["status"]}
@@ -93,6 +95,8 @@ def run(name: str, config: dict) -> dict:
         "rereadings": report["rereadings"],
         "unmatched": report["unmatched"],
         "excluded": report["excluded"],
+        "chosen_by_prediction": report["chosen_by_prediction"],
+        "iterations": len(report["iterations"]),
     }
 
 
@@ -100,10 +104,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="照合の検証")
     parser.add_argument("names", nargs="+")
     parser.add_argument("--config", type=Path)
+    parser.add_argument("--max-iterations", type=int, help="0 で筆全体の重心だけ（§5 のまま）")
+    parser.add_argument("--no-frame", action="store_true", help="図郭線を使わず、画像の範囲だけで切る")
     args = parser.parse_args(argv)
     config = load_config(args.config)
+    if args.max_iterations is not None:
+        config["max_iterations"] = args.max_iterations
     for name in args.names:
-        print(json.dumps(run(name, config), ensure_ascii=False))
+        print(json.dumps(run(name, config, args.no_frame), ensure_ascii=False))
     return 0
 
 

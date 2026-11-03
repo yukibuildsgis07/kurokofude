@@ -18,6 +18,7 @@ tools: Bash, Read
    - `data/ref/<図面>.geojson`（公図）
    - `data/masked/<図面>.chiban.json` の `confirmed` が `true` でなければ、照合せずに「確認画面で確定されていません」と返す
 2. 実行する：`python tools/georef/georef.py data/masked/<図面>.chiban.json data/ref/<図面>.geojson`
+   - 図郭線（画像上の四角形）があれば `--frame <JSON>` を付ける。精度が上がる。ダミー図面では `data/truth/<図面>.truth.json` に `frame_quad` として入っている（実物の図面では、設定か検出が必要。まだない）
    - `data/masked/<図面>.tfw` が上書きされ、詳細は `data/masked/<図面>.georef.json` に出る
 3. 次の形で報告する
    - 結果：`status`、使ったペア数（`pairs_used`／`pairs_found`）、残差の RMS と最大（m）、画素の大きさ（m）、回転（度）
