@@ -155,7 +155,7 @@ def test_one_digit_chiban_borrows_angle_from_neighbors(angle):
     theta = np.radians(angle)
     down = np.array([np.sin(theta), np.cos(theta)])
     center = np.array([300.0, 300.0])
-    chiban = box(rect(*center, 12, 22, angle), "5")
+    chiban = box(rect(*center, 16, 22, angle), "5")  # 実際の OCR の枠に近い寸法
     name = box(rect(*(center + down * 24), 80, 18, angle))
     neighbors = [box(rect(300 + dx, 150, 80, 18, angle)) for dx in (-100, 0, 100)]
     boxes = [chiban, name, *neighbors]

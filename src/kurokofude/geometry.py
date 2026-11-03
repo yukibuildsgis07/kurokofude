@@ -9,6 +9,7 @@ import numpy as np
 
 HALF_TURN_DEG = 180.0
 QUARTER_TURN_DEG = 90.0
+DEFAULT_ANGLE_DEG = 0.0
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,42 @@ def quad_frame(quad) -> Frame:
         height=v_max - v_min,
         angle_deg=-math.degrees(math.atan2(u[1], u[0])),
     )
+
+
+def frame_with_angle(quad, angle_deg: float) -> Frame:
+    """角度を外から与えた Frame。u, v の向きと幅・高さはその角度で測り直す。"""
+    points = np.asarray(quad, dtype=float)
+    theta = math.radians(angle_deg)
+    u = np.array([math.cos(theta), -math.sin(theta)])
+    v = np.array([math.sin(theta), math.cos(theta)])
+    u_min, u_max = _extent(points, u)
+    v_min, v_max = _extent(points, v)
+    return Frame(points.mean(axis=0), u, v, u_max - u_min, v_max - v_min, angle_deg)
+
+
+class FrameResolver:
+    """正方形に近い枠は自分の長辺を信じず、近傍の細長い枠の角度を使う（§11.6）。"""
+
+    def __init__(self, boxes: list[dict], angle_cfg: dict):
+        self._square_max = angle_cfg["square_aspect_max"]
+        self._neighbors = angle_cfg["neighbors"]
+        references = [
+            frame for frame in (quad_frame(box["quad"]) for box in boxes)
+            if frame.width >= angle_cfg["reference_aspect_min"] * frame.height
+        ]
+        self._centers = np.array([f.center for f in references]).reshape(-1, 2)
+        self._angles = np.array([f.angle_deg for f in references])
+        self._overall = float(np.median(self._angles)) if len(references) else DEFAULT_ANGLE_DEG
+
+    def frame(self, quad) -> Frame:
+        own = quad_frame(quad)
+        if own.width > self._square_max * own.height:
+            return own
+        if not len(self._angles):
+            return frame_with_angle(quad, self._overall)
+        distances = np.linalg.norm(self._centers - own.center, axis=1)
+        nearest = np.argsort(distances)[: self._neighbors]
+        return frame_with_angle(quad, float(np.median(self._angles[nearest])))
 
 
 def angle_difference_deg(a: float, b: float) -> float:

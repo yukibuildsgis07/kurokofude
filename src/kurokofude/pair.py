@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -26,8 +27,7 @@ def gap_below(chiban: Frame, candidate_center: np.ndarray) -> float:
     return float((candidate_center - bottom_mid) @ chiban.v)
 
 
-def is_candidate(chiban: Frame, quad, pair_cfg: dict) -> tuple[bool, float]:
-    frame = quad_frame(quad)
+def is_candidate(chiban: Frame, quad, frame: Frame, pair_cfg: dict) -> tuple[bool, float]:
     if angle_difference_deg(frame.angle_deg, chiban.angle_deg) > pair_cfg["max_angle_deg"]:
         return False, 0.0
     distance = gap_below(chiban, frame.center)
@@ -41,7 +41,9 @@ def is_candidate(chiban: Frame, quad, pair_cfg: dict) -> tuple[bool, float]:
     return True, distance
 
 
-def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> list[Pair]:
+def pair_names(
+    boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict, frame_of: Callable = quad_frame
+) -> list[Pair]:
     """条件を満たす枠を全部、その地番の氏名群とする（§11.2）。1つの枠は最も近い地番に渡す。"""
     chiban_ids = {id(box) for box in chiban_boxes}
     chiban_quads = {tuple(map(tuple, box["quad"])) for box in chiban_boxes}
@@ -52,9 +54,9 @@ def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> l
     ]
     nearest: dict[int, tuple[float, dict, dict]] = {}
     for chiban in chiban_boxes:
-        frame = quad_frame(chiban["quad"])
+        frame = frame_of(chiban["quad"])
         for candidate in candidates:
-            ok, distance = is_candidate(frame, candidate["quad"], pair_cfg)
+            ok, distance = is_candidate(frame, candidate["quad"], frame_of(candidate["quad"]), pair_cfg)
             current = nearest.get(id(candidate))
             if ok and (current is None or distance < current[0]):
                 nearest[id(candidate)] = (distance, chiban, candidate)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import cv2
 import numpy as np
 
@@ -92,16 +94,16 @@ def tighten(polygon, frame: Frame, gray: np.ndarray, mask_cfg: dict) -> list[lis
     return [list(map(float, p)) for p in result]
 
 
-def refine_pair(pair: Pair, gray: np.ndarray, mask_cfg: dict) -> None:
+def refine_pair(pair: Pair, gray: np.ndarray, mask_cfg: dict, frame_of: Callable = quad_frame) -> None:
     """ペアの塗る範囲を、地番との境目で切ってから詰める。"""
-    chiban = quad_frame(pair.chiban["quad"])
+    chiban = frame_of(pair.chiban["quad"])
     source = pair.source["quad"]
     offset = cut_offset(chiban, source, gray, mask_cfg)
     cut = clip_below_line(source, chiban.center + chiban.v * offset, chiban.v)
     if len(cut) < MIN_POLYGON_VERTICES:
         cut = source
-    pair.quad = tighten(cut, quad_frame(source), gray, mask_cfg)
+    pair.quad = tighten(cut, frame_of(source), gray, mask_cfg)
 
 
-def refine_unpaired(quad, gray: np.ndarray, mask_cfg: dict) -> list[list[float]]:
-    return tighten(quad, quad_frame(quad), gray, mask_cfg)
+def refine_unpaired(quad, gray: np.ndarray, mask_cfg: dict, frame_of: Callable = quad_frame) -> list[list[float]]:
+    return tighten(quad, frame_of(quad), gray, mask_cfg)
