@@ -13,6 +13,7 @@ STATUS_REMOVED = "removed"
 PERCENT = 100.0
 MIN_POLYGON_VERTICES = 3
 PAINTED = [255]
+JOIN_STYLE_MITRE = 2  # 四角形を角を保ったまま膨らませる
 
 
 def _polygon(quad) -> Polygon:
@@ -48,7 +49,7 @@ def _item_scores(items: list[dict], masks_geometry, detected: list[dict], ink: n
     }
 
 
-def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int) -> dict:
+def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int, overmask_margin_px: float) -> dict:
     """gray は塗る前の図面。地番のインクが塗られていないかを画素で確かめるのに使う。"""
     active = [
         m
@@ -64,11 +65,14 @@ def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int) ->
     names_union = unary_union([_polygon(item["name"]["quad"]) for item in items])
     chiban_polygons = [_polygon(item["chiban"]["quad"]) for item in items]
     clear_items = [item for item in items if not item.get("overlaps_line")]
+    # 塗りすぎ率は許容余白の外だけを数える。線や他の文字を塗った量を測るため（§12.3）
+    allowed = names_union.buffer(overmask_margin_px, join_style=JOIN_STYLE_MITRE)
 
     scores = _item_scores(items, masks_geometry, detected, ink, painted)
     return {
         "name_coverage_pct": scores["name_coverage_pct"],
-        "overmask_pct": round(_ratio(masks_geometry.difference(names_union).area, masks_geometry.area), 2),
+        "overmask_pct": round(_ratio(masks_geometry.difference(allowed).area, masks_geometry.area), 2),
+        "overmask_raw_pct": round(_ratio(masks_geometry.difference(names_union).area, masks_geometry.area), 2),
         "chiban_survival_pct": scores["chiban_survival_pct"],
         "chiban_detection_pct": scores["chiban_detection_pct"],
         "false_positives": sum(

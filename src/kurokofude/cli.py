@@ -57,7 +57,7 @@ def _score_one(truth_path: Path, result_path: Path, image_path: Path, config: di
     truth = json.loads(truth_path.read_text(encoding="utf-8"))
     result = json.loads(result_path.read_text(encoding="utf-8"))
     gray = cv2.cvtColor(read_image_for_ocr(image_path), cv2.COLOR_BGR2GRAY)
-    return evaluate(truth, result, gray, config["mask"]["ink_threshold"])
+    return evaluate(truth, result, gray, config["mask"]["ink_threshold"], config["evaluate"]["overmask_margin_px"])
 
 
 def cmd_eval(args: argparse.Namespace) -> int:

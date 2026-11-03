@@ -407,6 +407,7 @@ def truth_item(chiban_quad, name_quad):
 
 
 THRESHOLD = CONFIG["mask"]["ink_threshold"]
+MARGIN = CONFIG["evaluate"]["overmask_margin_px"]
 
 
 def gray_with_ink(*quads):
@@ -423,7 +424,7 @@ def test_evaluate_exact_mask_is_perfect():
         "chiban": [{"text": "1", "center": [50, 30], "quad": chiban, "score": 1.0}],
         "masks": [{"quad": name, "chiban": "1", "status": "auto"}],
     }
-    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD, MARGIN)
     assert scores["name_coverage_pct"] == 100.0
     assert scores["overmask_pct"] == 0.0
     assert scores["chiban_survival_pct"] == 100.0
@@ -440,12 +441,25 @@ def test_evaluate_counts_half_coverage_overmask_and_painted_chiban():
         "chiban": [{"text": "9", "center": [100, 90], "quad": chiban, "score": 1.0}],
         "masks": [{"quad": half_outside, "chiban": "9", "status": "auto"}, {"quad": chiban, "chiban": "9", "status": "added"}],
     }
-    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD, MARGIN)
     assert scores["name_coverage_pct"] == 50.0
     assert scores["chiban_survival_pct"] == 0.0
     assert scores["chiban_detection_pct"] == 0.0
     assert scores["false_positives"] == 1
     assert 0 < scores["overmask_pct"] < 100
+
+
+def test_overmask_allows_margin_around_name_but_keeps_raw_value():
+    name = [[30, 45], [70, 45], [70, 55], [30, 55]]
+    with_margin = [[27, 42], [73, 42], [73, 58], [27, 58]]
+    truth = {"items": [truth_item(rect(50, 30, 20, 10), name)]}
+    result = {"chiban": [], "masks": [{"quad": with_margin, "chiban": "1", "status": "auto"}]}
+    scores = evaluate(truth, result, gray_with_ink(name), THRESHOLD, MARGIN)
+    assert scores["overmask_pct"] == 0.0
+    assert scores["overmask_raw_pct"] > 40
+    beyond = [[10, 42], [73, 42], [73, 58], [10, 58]]
+    result["masks"][0]["quad"] = beyond
+    assert evaluate(truth, result, gray_with_ink(name), THRESHOLD, MARGIN)["overmask_pct"] > 0
 
 
 def test_evaluate_survival_ignores_paint_on_blank_margin_of_chiban_box():
@@ -455,10 +469,10 @@ def test_evaluate_survival_ignores_paint_on_blank_margin_of_chiban_box():
     touching_margin = [[30, 36], [70, 36], [70, 46], [30, 46]]
     truth = {"items": [truth_item(chiban_box, rect(50, 41, 40, 10))]}
     result = {"chiban": [], "masks": [{"quad": touching_margin, "chiban": None, "status": "unpaired"}]}
-    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD)["chiban_survival_pct"] == 100.0
+    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD, MARGIN)["chiban_survival_pct"] == 100.0
     touching_ink = [[30, 30], [70, 30], [70, 46], [30, 46]]
     result["masks"][0]["quad"] = touching_ink
-    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD)["chiban_survival_pct"] == 0.0
+    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD, MARGIN)["chiban_survival_pct"] == 0.0
 
 
 def test_evaluate_ignores_removed_masks_and_counts_review_items():
@@ -472,7 +486,7 @@ def test_evaluate_ignores_removed_masks_and_counts_review_items():
             {"quad": rect(100, 80, 10, 10), "chiban": None, "status": "unpaired"},
         ],
     }
-    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD, MARGIN)
     assert scores["name_coverage_pct"] == 0.0
     assert scores["unpaired_masks"] == 1
     assert scores["uncertain_chiban"] == 1
@@ -488,7 +502,7 @@ def test_evaluate_reports_scores_excluding_line_overlaps():
         ]
     }
     result = {"chiban": [], "masks": [{"quad": clear_name, "chiban": None, "status": "unpaired"}]}
-    scores = evaluate(truth, result, gray_with_ink(clear_chiban, hard_chiban), THRESHOLD)
+    scores = evaluate(truth, result, gray_with_ink(clear_chiban, hard_chiban), THRESHOLD, MARGIN)
     assert scores["name_coverage_pct"] == 50.0
     assert scores["excluding_line_overlaps"]["name_coverage_pct"] == 100.0
     assert scores["excluding_line_overlaps"]["truth_items"] == 1
@@ -618,4 +632,4 @@ def test_pipeline_on_fixture_keeps_most_chiban(small_ocr):
         "masks": [{"quad": p.quad, "chiban": p.chiban["text"], "status": "auto"} for p in pairs],
     }
     # 線と重なる難しい注記を含む1枚の現状値を下回らないこと。実物化の後で見直す
-    assert evaluate(truth, result, gray, THRESHOLD)["chiban_survival_pct"] >= FIXTURE_SURVIVAL_FLOOR
+    assert evaluate(truth, result, gray, THRESHOLD, MARGIN)["chiban_survival_pct"] >= FIXTURE_SURVIVAL_FLOOR
