@@ -7,6 +7,12 @@ ocr:
   # OCR直後に残してよい文字。他の文字は保存しない（§11.1）。地番の読み違いと縮尺・日付の記号だけ
   keep_char_class: '[0-9０-９OoIl|ー−–—\-ｰ－‐ノ\\/SsRrHh=:：.,\s]'
   digit_ratio_min: 0.5  # これ以上なら数字が主体
+  rerecognize:            # 急な角度の枠は、切り出して水平に回し、認識だけやり直す（§15.1）
+    rec_model_name: PP-OCRv6_medium_rec
+    min_angle_deg: 45
+    min_aspect: 1.5       # 縦横比がこれ未満の枠は角度が決まらないので対象にしない
+    expand_ratio: 0.1     # 切り出す前に長辺方向へ広げる割合（片側）
+    score_factor: 0.9
 chiban:
   pattern: '^\d{1,5}(-\d{1,4})?$'
   min_digits: 1

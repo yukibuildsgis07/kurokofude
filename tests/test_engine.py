@@ -600,6 +600,55 @@ def test_merge_duplicates_keeps_best_score():
     assert strong in merged and apart in merged and weak not in merged
 
 
+def steep_image():
+    """縦に読む文字の代わりに、上下で明るさの違う帯を描く。向きが分かるようにする。"""
+    image = np.full((300, 300, 3), 240, dtype=np.uint8)
+    image[100:150, 145:155] = 20
+    image[150:200, 145:155] = 120
+    return image
+
+
+def test_rerecognize_expands_tries_both_directions_and_takes_better_score(monkeypatch):
+    item = {"text": "63-3", "score": 0.99, "quad": rect(150, 150, 100, 20, 90)}
+    flat = {"text": "12", "score": 0.8, "quad": rect(50, 50, 100, 20, 0)}
+    seen = []
+
+    def fake_recognize(crops, _cfg):
+        seen.extend(crops)
+        return [("□", 0.2), ("263-3", 0.5)]
+
+    monkeypatch.setattr(ocr_module, "recognize_crops", fake_recognize)
+    result = ocr_module.rerecognize_steep([item, flat], steep_image(), CONFIG["ocr"])
+    assert len(seen) == 2  # 急な枠だけ2通り
+    assert seen[0].shape[:2] == (20, 120)  # 長辺方向に両側10%広げる
+    assert result[0]["text"] == "263-3"
+    assert result[0]["score"] == pytest.approx(0.5 * CONFIG["ocr"]["rerecognize"]["score_factor"])
+    assert result[0]["quad"] == rect(150, 150, 100, 20, 90)  # 四角形は変えない
+    assert result[1] == flat
+
+
+def test_rerecognize_crops_are_opposite_directions():
+    frame = quad_frame(rect(150, 150, 100, 20, 90))
+    forward = ocr_module.crop_along_text(steep_image(), frame, 0.0, False)
+    backward = ocr_module.crop_along_text(steep_image(), frame, 0.0, True)
+    assert forward[10, 25].mean() != pytest.approx(forward[10, 75].mean(), abs=30)
+    assert forward[10, 25].mean() == pytest.approx(backward[10, 75].mean(), abs=5)
+
+
+def test_rerecognize_never_keeps_name_text(monkeypatch):
+    item = {"text": "", "score": 0.9, "quad": rect(150, 150, 100, 20, 80)}
+    monkeypatch.setattr(ocr_module, "recognize_crops", lambda _crops, _cfg: [("架空 太郎", 0.9), ("架空", 0.1)])
+    result = ocr_module.rerecognize_steep([item], steep_image(), CONFIG["ocr"])
+    assert result[0]["text"] == ""
+
+
+def test_rerecognize_skips_square_boxes(monkeypatch):
+    """1桁の地番の縦長の枠は、水平でも 90 度に見えるので対象にしない。"""
+    item = {"text": "5", "score": 0.9, "quad": rect(150, 150, 16, 21)}
+    monkeypatch.setattr(ocr_module, "recognize_crops", lambda *_args: pytest.fail("呼ばれないはず"))
+    assert ocr_module.rerecognize_steep([item], steep_image(), CONFIG["ocr"]) == [item]
+
+
 def test_cache_prevents_second_run(tmp_path, monkeypatch):
     image = tmp_path / "a.tif"
     tifffile.imwrite(image, np.zeros((10, 10, 3), dtype=np.uint8), photometric="rgb")

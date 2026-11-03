@@ -14,9 +14,12 @@ import unicodedata
 from functools import lru_cache
 from pathlib import Path
 
+import cv2
 import numpy as np
 import tifffile
 from shapely.geometry import Polygon
+
+from .geometry import Frame, quad_frame
 
 HASH_CHUNK_BYTES = 1024 * 1024
 GRAY_NDIM = 2
@@ -103,6 +106,56 @@ def _recognize(engine, image_bgr: np.ndarray, origin: tuple[int, int], ocr_cfg: 
     return boxes
 
 
+@lru_cache(maxsize=1)
+def _create_recognizer(model_name: str, enable_mkldnn: bool):
+    from paddleocr import TextRecognition
+
+    return TextRecognition(model_name=model_name, enable_mkldnn=enable_mkldnn)
+
+
+def recognize_crops(crops: list[np.ndarray], ocr_cfg: dict) -> list[tuple[str, float]]:
+    """検出なしで認識だけを行う。"""
+    recognizer = _create_recognizer(ocr_cfg["rerecognize"]["rec_model_name"], ocr_cfg["enable_mkldnn"])
+    return [(page["rec_text"], float(page["rec_score"])) for page in recognizer.predict(crops)]
+
+
+def crop_along_text(image_bgr: np.ndarray, frame: Frame, expand_ratio: float, reverse: bool) -> np.ndarray:
+    """枠を長辺方向に広げて切り出し、読み方向が右になるように回す。"""
+    margin = frame.width * expand_ratio
+    width = max(1, int(np.ceil(frame.width + 2 * margin)))
+    height = max(1, int(np.ceil(frame.height)))
+    sign = -1.0 if reverse else 1.0
+    u, v = frame.u * sign, frame.v * sign
+    start = frame.center - u * width / 2 - v * height / 2
+    patch_to_image = np.array([[u[0], v[0], start[0]], [u[1], v[1], start[1]]])
+    return cv2.warpAffine(
+        image_bgr, patch_to_image, (width, height), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE
+    )
+
+
+def rerecognize_steep(boxes: list[dict], image_bgr: np.ndarray, ocr_cfg: dict) -> list[dict]:
+    """急な角度の枠の認識をやり直す（§15.1）。四角形は変えない。"""
+    cfg = ocr_cfg["rerecognize"]
+    targets = []
+    for box in boxes:
+        frame = quad_frame(box["quad"])
+        if abs(frame.angle_deg) > cfg["min_angle_deg"] and frame.width >= cfg["min_aspect"] * frame.height:
+            targets.append((box, frame))
+    if not targets:
+        return boxes
+    crops = [
+        crop_along_text(image_bgr, frame, cfg["expand_ratio"], reverse)
+        for _, frame in targets
+        for reverse in (False, True)
+    ]
+    results = recognize_crops(crops, ocr_cfg)
+    for index, (box, _) in enumerate(targets):
+        text, score = max(results[2 * index : 2 * index + 2], key=lambda result: result[1])
+        box["text"] = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg["digit_ratio_min"])
+        box["score"] = score * cfg["score_factor"]
+    return boxes
+
+
 def read_image_for_ocr(image_path: Path) -> np.ndarray:
     image = tifffile.imread(image_path)
     if image.ndim == GRAY_NDIM:
@@ -121,7 +174,7 @@ def run_engine(image_bgr: np.ndarray, ocr_cfg: dict) -> list[dict]:
             boxes.extend(_recognize(engine, tile, (x, y), ocr_cfg))
     if max(height, width) > max_side:
         boxes = merge_duplicates(boxes, ocr_cfg["tile_merge_iou"])
-    return boxes
+    return rerecognize_steep(boxes, image_bgr, ocr_cfg)
 
 
 def run_ocr(image_path: Path, ocr_cfg: dict, cache_dir: Path) -> list[dict]:
