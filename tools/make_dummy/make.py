@@ -83,6 +83,8 @@ def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Labe
                 "name": {"quad": quad_to_list(label.name_quad)},
                 "angle_deg": round(label.angle_deg, QUAD_DECIMALS),
                 "slanted": label.slanted,
+                "overlaps_line": label.overlaps_line,
+                "leader": label.leader is not None,
             }
             for label in labels
         ],
@@ -144,7 +146,12 @@ def main(argv: list[str] | None = None) -> int:
         name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
         write_outputs(args.out, args.truth_out, args.ref_out, name, rendered, sheet, data, chiban_re)
         height, width = rendered.image.shape[:2]
-        print(f"{name}: {width}x{height}px, 図郭 {sheet.number}, 注記 {len(rendered.labels)} 件")
+        leaders = sum(1 for label in rendered.labels if label.leader is not None)
+        overlaps = sum(1 for label in rendered.labels if label.overlaps_line)
+        print(
+            f"{name}: {width}x{height}px, 図郭 {sheet.number}, 注記 {len(rendered.labels)} 件"
+            f"（引き出し線 {leaders}、線と重なる {overlaps}）"
+        )
         made += 1
 
     if made < args.count:

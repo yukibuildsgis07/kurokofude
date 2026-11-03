@@ -16,7 +16,11 @@ render:
   name_height_mm: 2.6
   name_gap_mm: 0.5                 # 地番の下端と氏名の上端の間隔
   label_clearance_px: 6            # 注記どうしの最小間隔
-  placement_search_step_px: 12     # 重なったときに位置をずらす幅
+  inside_search_step_px: 10        # 筆の内側で線を避ける位置を探す間隔
+  leader_search_step_px: 16        # 引き出し線で外に置く位置を探す間隔
+  leader_max_distance_px: 320      # 引き出し線で外に置く最大の距離
+  leader_width_px: 1
+  placement_search_step_px: 12     # 線と重ねて置くときに位置をずらす幅
   placement_search_rings: 5
   slanted_ratio: 0.3               # 斜めの注記の割合
   slant_min_deg: 12                # 斜めと呼ぶ最小角度

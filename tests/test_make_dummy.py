@@ -1,13 +1,16 @@
 """ダミー図面生成の単体テスト。元データ（zip）は使わず、小さな XML で確かめる。"""
 
 import json
+import random
 import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
-from shapely.geometry import Polygon
+from PIL import ImageFont
+from shapely.geometry import LineString, Point, Polygon, box
+from shapely.ops import unary_union
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "make_dummy"))
@@ -116,6 +119,70 @@ def test_fixture_truth_has_slanted_labels_and_no_place_names():
     assert 1 in lengths and 2 in lengths
     assert all(set(item["name"]) == {"quad"} for item in truth["items"])  # 氏名の文字列を持たない
     assert {"source", "image_size", "sheet", "scale_denominator", "items"} == set(truth)
+
+
+NAMES = {"family": ["AA"], "given": ["BB"]}
+LAYOUT_CFG = {
+    "label_clearance_px": 6,
+    "slanted_ratio": 0.0,
+    "slant_min_deg": 12,
+    "slant_max_deg": 40,
+    "inside_search_step_px": 10,
+    "leader_search_step_px": 16,
+    "leader_max_distance_px": 320,
+    "placement_search_step_px": 12,
+    "placement_search_rings": 5,
+}
+
+
+def lay_out(polygons, lines=None, size=(800, 600)):
+    parcels = [moj_xml.Parcel(chiban=str(i + 100), polygon=Polygon(c)) for i, c in enumerate(polygons)]
+    identity = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    rings = lines or unary_union([LineString(c + c[:1]) for c in polygons])
+    font = ImageFont.load_default(size=24)
+    return render.layout_labels(
+        parcels, identity, size, box(780, 580, 800, 600), rings, font, font, 4, random.Random(1), LAYOUT_CFG, NAMES
+    )
+
+
+def square(x, y, w, h):
+    return [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+
+
+def test_label_fits_inside_parcel_without_touching_its_lines():
+    polygon = square(100, 100, 300, 200)
+    label = lay_out([polygon])[0]
+    assert not label.overlaps_line and label.leader is None
+    text = Polygon(label.chiban_quad).union(Polygon(label.name_quad))
+    assert Polygon(polygon).contains(text)
+    assert not text.intersects(LineString(polygon + polygon[:1]))
+
+
+def test_narrow_parcel_gets_a_leader_from_inside_to_label_edge():
+    polygon = square(400, 100, 20, 300)
+    label = lay_out([polygon])[0]
+    assert not label.overlaps_line
+    assert label.leader is not None
+    start, end = label.leader
+    text = Polygon(label.chiban_quad).union(Polygon(label.name_quad))
+    assert Polygon(polygon).contains(Point(start))
+    assert not text.intersects(LineString(polygon + polygon[:1]))
+    assert text.distance(Point(end)) < 1e-6
+
+
+def test_overlap_is_recorded_only_when_nothing_else_works():
+    """画面が線で埋まっていて置き場がないときだけ、線と重ねて記録する。"""
+    polygon = square(100, 100, 20, 300)
+    grid = unary_union([LineString([(x, 0), (x, 600)]) for x in range(0, 800, 15)])
+    label = lay_out([polygon], lines=grid)[0]
+    assert label.overlaps_line is True
+    assert label.leader is None
+
+
+def test_fixture_truth_records_placement():
+    truth = json.loads((ROOT / "tests" / "fixtures" / "sample_small.truth.json").read_text(encoding="utf-8"))
+    assert all(isinstance(item["overlaps_line"], bool) for item in truth["items"])
+    assert all(isinstance(item["leader"], bool) for item in truth["items"])
 
 
 def test_config_uses_only_plane_coordinate_system_8():

@@ -10,7 +10,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from shapely.geometry import Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
+from shapely.ops import nearest_points, unary_union
+from shapely.prepared import prep
 
 from moj_xml import Parcel, Sheet
 
@@ -32,6 +34,8 @@ class Label:
     slanted: bool
     chiban_quad: np.ndarray
     name_quad: np.ndarray
+    overlaps_line: bool = False
+    leader: np.ndarray | None = None  # 引き出し線の両端（筆の内側の点、文字枠の端）
 
 
 @dataclass
@@ -184,11 +188,136 @@ def search_offsets(step: int, rings: int):
             yield np.array([math.cos(theta), math.sin(theta)]) * step * ring
 
 
+@dataclass
+class _Plan:
+    """1つの注記の中身。位置はまだ決まっていない。"""
+
+    parcel: Parcel
+    polygon: Polygon  # 画素座標の筆（画像内に切り抜いたもの）
+    anchor: np.ndarray  # 筆の内側の点
+    name: str
+    angle_options: list[tuple[float, bool]]  # 試す角度と、斜めかどうか
+    chiban_size: tuple[float, float]
+    name_size: tuple[float, float]
+
+
+class _Layout:
+    """置いた注記と引き出し線を覚えて、空いているかを判定する。"""
+
+    def __init__(self, size: tuple[int, int], keep_out: Polygon, lines, clearance: float, gap_px: float):
+        self.canvas = box(0, 0, size[0], size[1]).buffer(-clearance)
+        self.taken: list = [keep_out]
+        self.lines = prep(lines)
+        self.clearance = clearance
+        self.gap_px = gap_px
+
+    def quads(self, plan: _Plan, center: np.ndarray, angle: float) -> tuple[np.ndarray, np.ndarray]:
+        _, down = text_vectors(angle)
+        to_name = down * (plan.chiban_size[1] / 2 + self.gap_px + plan.name_size[1] / 2)
+        chiban_center = center - to_name / 2
+        return (
+            text_quad(chiban_center, *plan.chiban_size, angle),
+            text_quad(chiban_center + to_name, *plan.name_size, angle),
+        )
+
+    def block(self, chiban_quad: np.ndarray, name_quad: np.ndarray):
+        return Polygon(chiban_quad).union(Polygon(name_quad)).buffer(self.clearance)
+
+    def is_free(self, block) -> bool:
+        return self.canvas.contains(block) and all(not block.intersects(t) for t in self.taken)
+
+    def crosses_line(self, block) -> bool:
+        return self.lines.intersects(block)
+
+
+def _make_plan(parcel, world_to_px, canvas, chiban_font, name_font, rng, render_cfg, names) -> _Plan | None:
+    polygon_px = Polygon(apply_affine(world_to_px, np.array(parcel.polygon.exterior.coords)))
+    if not polygon_px.is_valid:
+        polygon_px = polygon_px.buffer(0)
+    visible = polygon_px.intersection(canvas)
+    if visible.is_empty or visible.geom_type != "Polygon":
+        return None
+    point = visible.representative_point()
+    name = fake_name(rng, names)
+    angle, slanted = choose_angle(polygon_px, rng, render_cfg)
+    options = [(angle, slanted)]
+    along_parcel = parcel_angle(polygon_px)
+    if not slanted and abs(along_parcel) <= render_cfg["slant_max_deg"]:
+        options.append((along_parcel, abs(along_parcel) >= render_cfg["slant_min_deg"]))  # 細長い筆は筆の向きに書く
+    return _Plan(
+        parcel,
+        visible,
+        np.array([point.x, point.y]),
+        name,
+        options,
+        text_extent(chiban_font, parcel.chiban),
+        text_extent(name_font, name),
+    )
+
+
+def _place_inside(plan: _Plan, layout: _Layout, step: int) -> Label | None:
+    """筆の内側で、線と交差しない位置を代表点に近い順に探す。"""
+    min_x, min_y, max_x, max_y = plan.polygon.bounds
+    grid = np.array(
+        [(x, y) for y in np.arange(min_y, max_y, step) for x in np.arange(min_x, max_x, step)], dtype=float
+    ).reshape(-1, 2)
+    points = np.vstack([plan.anchor, grid[np.argsort(np.linalg.norm(grid - plan.anchor, axis=1))]])
+    inside = prep(plan.polygon)
+    for angle, slanted in plan.angle_options:
+        for center in points:
+            chiban_quad, name_quad = layout.quads(plan, center, angle)
+            block = layout.block(chiban_quad, name_quad)
+            if inside.contains(block) and not layout.crosses_line(block) and layout.is_free(block):
+                layout.taken.append(block)
+                return Label(plan.parcel.chiban, plan.name, angle, slanted, chiban_quad, name_quad)
+    return None
+
+
+def _place_with_leader(plan: _Plan, layout: _Layout, step: int, rings: int) -> Label | None:
+    """筆の外の空いた場所に置き、筆の内側の点から文字枠の端まで引き出し線を引く。"""
+    angle, slanted = plan.angle_options[0]
+    for offset in search_offsets(step, rings):
+        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, angle)
+        block = layout.block(chiban_quad, name_quad)
+        if layout.crosses_line(block) or not layout.is_free(block):
+            continue
+        text = Polygon(chiban_quad).union(Polygon(name_quad))
+        end = nearest_points(Point(plan.anchor), text)[1]
+        leader = LineString([plan.anchor, (end.x, end.y)])
+        if any(leader.intersects(t) for t in layout.taken):
+            continue
+        layout.taken.extend([block, leader.buffer(layout.clearance)])
+        return Label(
+            plan.parcel.chiban,
+            plan.name,
+            angle,
+            slanted,
+            chiban_quad,
+            name_quad,
+            leader=np.array(leader.coords),
+        )
+    return None
+
+
+def _place_over_line(plan: _Plan, layout: _Layout, step: int, rings: int) -> Label | None:
+    """どうしても置けないときだけ、線と重ねて置く。"""
+    angle, slanted = plan.angle_options[0]
+    for offset in search_offsets(step, rings):
+        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, angle)
+        block = layout.block(chiban_quad, name_quad)
+        if layout.is_free(block):
+            layout.taken.append(block)
+            overlaps = layout.crosses_line(block)
+            return Label(plan.parcel.chiban, plan.name, angle, slanted, chiban_quad, name_quad, overlaps_line=overlaps)
+    return None
+
+
 def layout_labels(
     parcels: list[Parcel],
     world_to_px: np.ndarray,
     size: tuple[int, int],
     keep_out: Polygon,
+    lines,
     chiban_font: ImageFont.FreeTypeFont,
     name_font: ImageFont.FreeTypeFont,
     gap_px: float,
@@ -196,40 +325,35 @@ def layout_labels(
     render_cfg: dict,
     names: dict,
 ) -> list[Label]:
-    width, height = size
-    canvas = box(0, 0, width, height)
-    taken: list[Polygon] = [keep_out]
+    """全筆で内側を先に試し、余った筆に引き出し線、最後に線との重なりを許す（§11.10）。"""
+    canvas = box(0, 0, size[0], size[1])
+    layout = _Layout(size, keep_out, lines, render_cfg["label_clearance_px"], gap_px)
+    plans = [
+        plan
+        for plan in (
+            _make_plan(p, world_to_px, canvas, chiban_font, name_font, rng, render_cfg, names) for p in parcels
+        )
+        if plan is not None
+    ]
+    leader_step = render_cfg["leader_search_step_px"]
+    leader_rings = render_cfg["leader_max_distance_px"] // leader_step
+    stages = [
+        lambda plan: _place_inside(plan, layout, render_cfg["inside_search_step_px"]),
+        lambda plan: _place_with_leader(plan, layout, leader_step, leader_rings),
+        lambda plan: _place_over_line(
+            plan, layout, render_cfg["placement_search_step_px"], render_cfg["placement_search_rings"]
+        ),
+    ]
     labels: list[Label] = []
-    clearance = render_cfg["label_clearance_px"]
-
-    for parcel in parcels:
-        polygon_px = Polygon(apply_affine(world_to_px, np.array(parcel.polygon.exterior.coords)))
-        if not polygon_px.is_valid:
-            polygon_px = polygon_px.buffer(0)
-        visible = polygon_px.intersection(canvas)
-        if visible.is_empty or visible.geom_type != "Polygon":
-            continue
-        point = visible.representative_point()
-        anchor = np.array([point.x, point.y])
-
-        name = fake_name(rng, names)
-        angle, slanted = choose_angle(polygon_px, rng, render_cfg)
-        _, down = text_vectors(angle)
-        chiban_w, chiban_h = text_extent(chiban_font, parcel.chiban)
-        name_w, name_h = text_extent(name_font, name)
-        to_name = down * (chiban_h / 2 + gap_px + name_h / 2)
-
-        for offset in search_offsets(render_cfg["placement_search_step_px"], render_cfg["placement_search_rings"]):
-            chiban_center = anchor + offset - to_name / 2
-            name_center = chiban_center + to_name
-            chiban_quad = text_quad(chiban_center, chiban_w, chiban_h, angle)
-            name_quad = text_quad(name_center, name_w, name_h, angle)
-            block = Polygon(chiban_quad).union(Polygon(name_quad)).buffer(clearance)
-            inside = canvas.buffer(-clearance).contains(block)
-            if inside and all(not block.intersects(t) for t in taken):
-                taken.append(block)
-                labels.append(Label(parcel.chiban, name, angle, slanted, chiban_quad, name_quad))
-                break
+    for place in stages:
+        remaining = []
+        for plan in plans:
+            label = place(plan)
+            if label is None:
+                remaining.append(plan)
+            else:
+                labels.append(label)
+        plans = remaining
     return labels
 
 
@@ -338,13 +462,16 @@ def render_sheet(
     world_to_px, size = view_transform(sheet, drawable, cfg, crop)
     width, height = size
 
-    ink =np.zeros((height, width), dtype=np.uint8)
+    ink = np.zeros((height, width), dtype=np.uint8)
+    rings = []
     for parcel in parcels:
         ring = apply_affine(world_to_px, np.array(parcel.polygon.exterior.coords))
+        rings.append(LineString(ring))
         cv2.polylines(
             ink, [np.round(ring).astype(np.int32)], True, FULL_INK, render_cfg["line_width_px"], cv2.LINE_AA
         )
     frame = apply_affine(world_to_px, np.array([sheet.corners[k] for k in ("ul", "ur", "lr", "ll")]))
+    rings.append(LineString(np.vstack([frame, frame[:1]])))
     cv2.polylines(ink, [np.round(frame).astype(np.int32)], True, FULL_INK, render_cfg["frame_width_px"], cv2.LINE_AA)
 
     chiban_font = ImageFont.truetype(str(font_path), int(round(mm_to_px(render_cfg["chiban_height_mm"], dpi))))
@@ -360,6 +487,7 @@ def render_sheet(
         world_to_px,
         size,
         keep_out,
+        unary_union(rings),
         chiban_font,
         name_font,
         mm_to_px(render_cfg["name_gap_mm"], dpi),
@@ -368,6 +496,9 @@ def render_sheet(
         cfg["names"],
     )
     for label in labels:
+        if label.leader is not None:
+            start, end = np.round(label.leader).astype(int).tolist()
+            cv2.line(ink, tuple(start), tuple(end), FULL_INK, render_cfg["leader_width_px"], cv2.LINE_AA)
         stamp_text(ink, chiban_font, label.chiban, label.chiban_quad.mean(axis=0), label.angle_deg)
         stamp_text(ink, name_font, label.name, label.name_quad.mean(axis=0), label.angle_deg)
 
