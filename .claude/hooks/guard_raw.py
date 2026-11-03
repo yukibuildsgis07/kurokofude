@@ -23,27 +23,42 @@ CONFIG_RELATIVE_PATH = Path("configs") / "default.yaml"
 PATH_FIELDS = ("file_path", "path", "notebook_path")
 PATTERN_FIELDS = ("pattern", "glob")
 GLOB_CHARS = "*?["
+ALLOWED_COMMANDS_KEY = "hook_allowed_commands"
+# 許可リストのコマンドに含めてはいけない文字（後ろに別のコマンドをつなぐ抜け道になる）
+COMMAND_CHAIN_CHARS = ";&|<>`$()\n\r"
 # シェル上でパスの区切りになりうる文字
 TOKEN_SPLIT = re.compile(r"[\s=:;,|&()<>{}`$]+")
 
 
-def load_protected_names(project_dir: Path) -> set[str]:
-    """configs/default.yaml の protected_dirs から保護ディレクトリの末尾名を集める。
-
-    PyYAML に依存しないよう、該当ブロックだけを行単位で読む。既定値は常に含める。
-    """
-    dirs = list(DEFAULT_PROTECTED_DIRS)
+def read_config_list(project_dir: Path, key: str) -> list[str]:
+    """configs/default.yaml の最上位のリストを読む。PyYAML に依存しないよう行単位で読む。"""
     config_path = project_dir / CONFIG_RELATIVE_PATH
-    if config_path.is_file():
-        in_block = False
-        for line in config_path.read_text(encoding="utf-8").splitlines():
-            if line.startswith("protected_dirs:"):
-                in_block = True
-            elif in_block and line.strip().startswith("- "):
-                dirs.append(line.strip()[2:].split("#")[0].strip().strip("'\""))
-            elif in_block and line.strip():
-                in_block = False
+    if not config_path.is_file():
+        return []
+    values = []
+    in_block = False
+    for line in config_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{key}:"):
+            in_block = True
+        elif in_block and line.strip().startswith("- "):
+            values.append(line.strip()[2:].split("#")[0].strip().strip("'\""))
+        elif in_block and line.strip():
+            in_block = False
+    return values
+
+
+def load_protected_names(project_dir: Path) -> set[str]:
+    """保護ディレクトリの末尾名を集める。既定値は常に含める。"""
+    dirs = list(DEFAULT_PROTECTED_DIRS) + read_config_list(project_dir, "protected_dirs")
     return {split_components(d)[-1] for d in dirs if d}
+
+
+def command_is_allowed(command: str, allowed: list[str]) -> bool:
+    """許可リストの語で始まり、別のコマンドをつなげない形のときだけ通す（設計書 §4.1）。"""
+    if any(ch in command for ch in COMMAND_CHAIN_CHARS):
+        return False
+    words = command.replace("\\", "/").split()
+    return any(words[: len(prefix.split())] == prefix.split() for prefix in allowed if prefix)
 
 
 def split_components(text: str) -> list[str]:
@@ -99,7 +114,9 @@ def should_block(payload: dict) -> bool:
         if isinstance(value, str) and value and text_hits_protected(value, names):
             return True
     command = tool_input.get("command")
-    return isinstance(command, str) and command_hits_protected(command, cwd, names)
+    if not isinstance(command, str) or not command_hits_protected(command, cwd, names):
+        return False
+    return not command_is_allowed(command, read_config_list(project_dir, ALLOWED_COMMANDS_KEY))
 
 
 def main() -> int:

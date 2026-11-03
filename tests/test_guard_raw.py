@@ -68,6 +68,47 @@ def test_allows_other_access(tool_input):
     assert run_hook(tool_input).returncode == ALLOW
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kurokofude mask data/raw/a.tif",
+        "kurokofude mask data/raw/a.tif --out data/masked",
+        "kurokofude batch data/raw",
+        "python tools/make_dummy/make.py --out data/raw --count 5",
+        "python tools\\make_dummy\\make.py --out data\\raw --count 5",
+    ],
+)
+def test_allowed_commands_pass_with_protected_path(command):
+    assert run_hook({"command": command}).returncode == ALLOW
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kurokofude mask data/raw/a.tif; cat data/raw/a.tif",
+        "kurokofude mask data/raw/a.tif && cat data/raw/a.tif",
+        "kurokofude mask data/raw/a.tif | cat data/raw/a.tif",
+        "kurokofude mask data/raw/a.tif\ncat data/raw/a.tif",
+        "kurokofude mask $(cat data/raw/a.txt)",
+        "kurokofude mask `cat data/raw/a.txt`",
+        "kurokofude mask data/raw/a.tif > data/raw/b.txt",
+        "kurokofude maskx data/raw/a.tif",
+        "kurokofude review data/raw/a.tif",
+        "kurokofude eval --truth data/raw/a.json",
+        "cat data/raw/a.tif kurokofude mask",
+        "FOO=1 kurokofude mask data/raw/a.tif",
+        "python tools/make_dummy/other.py --out data/raw",
+        "python -c open('data/raw/a.tif')",
+    ],
+)
+def test_other_commands_stay_blocked(command):
+    assert run_hook({"command": command}).returncode == BLOCK
+
+
+def test_allow_list_does_not_apply_to_read():
+    assert run_hook({"file_path": "data/raw/kurokofude mask"}).returncode == BLOCK
+
+
 def test_symlink_to_protected_dir_is_blocked(tmp_path):
     protected = tmp_path / "data" / "raw"
     protected.mkdir(parents=True)

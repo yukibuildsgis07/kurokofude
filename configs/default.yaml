@@ -23,3 +23,7 @@ mask:
   color: [0, 0, 0]      # 画像のチャンネル順（RGB）
 protected_dirs:
   - data/raw
+hook_allowed_commands:   # 保護ディレクトリを含んでも Bash で通すコマンドの先頭（§4.1）
+  - kurokofude mask
+  - kurokofude batch
+  - python tools/make_dummy/make.py
