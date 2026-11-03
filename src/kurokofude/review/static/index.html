@@ -62,6 +62,8 @@ let scale = 1, offsetX = 0, offsetY = 0;
 let drag = null, dirty = false;
 
 function originOf(m) { return m.origin || (m.status === "confirmed" ? "auto" : m.status); }
+// 元の status を origin に残す。外したあとで戻す先になる（mask_drawing が書いた塗りには origin がない）
+function normalize(d) { for (const m of d.masks) { if (!m.origin) m.origin = originOf(m); } return d; }
 function styleOf(m) { return STYLES[originOf(m) === "uncertain_chiban" ? "added" : originOf(m)] || STYLES.added; }
 function toScreen(p) { return [p[0] * scale + offsetX, p[1] * scale + offsetY]; }
 function toImage(x, y) { return [(x - offsetX) / scale, (y - offsetY) / scale]; }
@@ -214,7 +216,7 @@ async function api(method, url, body) {
 }
 async function save() {
   const masks = data.masks.map(m => ({ quad: m.quad, status: m.status, origin: originOf(m), chiban: m.chiban ?? null, uncertain_index: m.uncertain_index ?? null }));
-  data = await api("PUT", `/api/drawings/${encodeURIComponent(name)}`, { masks });
+  data = normalize(await api("PUT", `/api/drawings/${encodeURIComponent(name)}`, { masks }));
   dirty = false; draw();
 }
 document.getElementById("save").onclick = async () => {
@@ -225,7 +227,7 @@ document.getElementById("confirm").onclick = async () => {
   button.disabled = true; statusBox.textContent = "塗り直しています…";
   try {
     await save();
-    data = await api("POST", `/api/drawings/${encodeURIComponent(name)}/confirm`);
+    data = normalize(await api("POST", `/api/drawings/${encodeURIComponent(name)}/confirm`));
     statusBox.textContent = "確定しました。data/masked/ の図面を塗り直しました"; draw();
   } catch (e) { statusBox.textContent = "確定に失敗：" + e.message; }
   button.disabled = false;
@@ -236,7 +238,7 @@ window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); 
 async function load(target) {
   if (dirty && !confirm("保存していない変更があります。切り替えますか？")) { document.getElementById("drawing").value = name; return; }
   name = target; dirty = false; statusBox.textContent = "読み込んでいます…";
-  data = await api("GET", `/api/drawings/${encodeURIComponent(name)}`);
+  data = normalize(await api("GET", `/api/drawings/${encodeURIComponent(name)}`));
   history.replaceState(null, "", `?drawing=${encodeURIComponent(name)}`);
   image = new Image();
   image.onload = () => { statusBox.textContent = ""; fit(); };
