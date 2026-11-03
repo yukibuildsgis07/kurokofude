@@ -48,7 +48,7 @@ def cut_at_chiban_bottom(quad, chiban: Frame, margin_px: float) -> list[list[flo
 
 
 def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> list[Pair]:
-    """地番 → 氏名ボックスを選ぶ。1つの候補を複数の地番が選んだら、近い方に渡す。"""
+    """条件を満たす枠を全部、その地番の氏名群とする（§11.2）。1つの枠は最も近い地番に渡す。"""
     chiban_ids = {id(box) for box in chiban_boxes}
     chiban_quads = {tuple(map(tuple, box["quad"])) for box in chiban_boxes}
     candidates = [
@@ -56,23 +56,17 @@ def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> l
         for box in boxes
         if id(box) not in chiban_ids and tuple(map(tuple, box["quad"])) not in chiban_quads
     ]
-    best_for_candidate: dict[int, tuple[float, dict, dict]] = {}
+    nearest: dict[int, tuple[float, dict, dict]] = {}
     for chiban in chiban_boxes:
         frame = quad_frame(chiban["quad"])
-        best: tuple[float, dict] | None = None
         for candidate in candidates:
             ok, distance = is_candidate(frame, candidate["quad"], pair_cfg)
-            if ok and (best is None or distance < best[0]):
-                best = (distance, candidate)
-        if best is None:
-            continue
-        distance, candidate = best
-        current = best_for_candidate.get(id(candidate))
-        if current is None or distance < current[0]:
-            best_for_candidate[id(candidate)] = (distance, chiban, candidate)
+            current = nearest.get(id(candidate))
+            if ok and (current is None or distance < current[0]):
+                nearest[id(candidate)] = (distance, chiban, candidate)
 
     pairs = []
-    for distance, chiban, candidate in best_for_candidate.values():
+    for distance, chiban, candidate in nearest.values():
         frame = quad_frame(chiban["quad"])
         quad = cut_at_chiban_bottom(candidate["quad"], frame, pair_cfg["cut_margin_px"])
         if quad:
