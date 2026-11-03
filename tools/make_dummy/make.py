@@ -1,0 +1,137 @@
+"""登記所備付地図XMLからダミー図面（.tif + .tfw + .truth.json + .geojson）を作る。
+
+python tools/make_dummy/make.py --source <地図XMLのzipがあるフォルダ> --out <出力先> --count 5
+小さな1枚（CIのフィクスチャ用）は --crop 1000 700 --name sample_small --count 1
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import re
+import sys
+from pathlib import Path
+
+import numpy as np
+import tifffile
+import yaml
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from moj_xml import MapData, Sheet, parse_map, read_coordinate_system, read_xml_bytes, sheet_to_geojson  # noqa: E402
+from render import Label, find_font_path, render_sheet  # noqa: E402
+
+DEFAULT_CONFIG = SCRIPT_DIR / "config.yaml"
+QUAD_DECIMALS = 2
+
+
+def iter_map_sources(source_dir: Path, coordinate_system: str, seed: int):
+    """座標系が完全に一致する地図XMLだけを、シード固定の順で返す。"""
+    zips = sorted(source_dir.rglob("*.zip"))
+    random.Random(seed).shuffle(zips)
+    for zip_path in zips:
+        xml_bytes = read_xml_bytes(zip_path)
+        if read_coordinate_system(xml_bytes) == coordinate_system:
+            yield xml_bytes
+
+
+def pick_sheet(data: MapData, rng: random.Random, source_cfg: dict, chiban_re: re.Pattern) -> Sheet | None:
+    candidates = [
+        sheet
+        for sheet in data.sheets
+        if sheet.scale_denominator == source_cfg["scale_denominator"]
+        and sum(
+            1
+            for pid in sheet.parcel_ids
+            if pid in data.parcels and chiban_re.fullmatch(data.parcels[pid].chiban)
+        )
+        >= source_cfg["min_parcels_in_sheet"]
+    ]
+    return rng.choice(candidates) if candidates else None
+
+
+def quad_to_list(quad: np.ndarray) -> list[list[float]]:
+    return [[round(float(x), QUAD_DECIMALS), round(float(y), QUAD_DECIMALS)] for x, y in quad]
+
+
+def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Label]) -> dict:
+    return {
+        "source": f"{name}.tif",
+        "image_size": list(size),
+        "sheet": sheet.number,
+        "scale_denominator": sheet.scale_denominator,
+        "items": [
+            {
+                "chiban": {"text": label.chiban, "quad": quad_to_list(label.chiban_quad)},
+                "name": {"text": label.name, "quad": quad_to_list(label.name_quad)},
+                "angle_deg": round(label.angle_deg, QUAD_DECIMALS),
+                "slanted": label.slanted,
+            }
+            for label in labels
+        ],
+    }
+
+
+def write_outputs(out_dir: Path, name: str, rendered, sheet: Sheet, data: MapData, chiban_re: re.Pattern) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tifffile.imwrite(out_dir / f"{name}.tif", rendered.image, photometric="rgb")
+    (out_dir / f"{name}.tfw").write_text(
+        "\n".join(f"{value:.10f}" for value in rendered.world_file) + "\n", encoding="ascii"
+    )
+    height, width = rendered.image.shape[:2]
+    (out_dir / f"{name}.truth.json").write_text(
+        json.dumps(truth_json(name, (width, height), sheet, rendered.labels), ensure_ascii=False, indent=1),
+        encoding="utf-8",
+    )
+    geojson = sheet_to_geojson(sheet, data, lambda c: chiban_re.fullmatch(c) is not None)
+    (out_dir / f"{name}.geojson").write_text(json.dumps(geojson, ensure_ascii=False), encoding="utf-8")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="ダミー図面を生成する")
+    parser.add_argument("--source", type=Path, default=Path("data") / "source")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--count", type=int, default=5)
+    parser.add_argument("--seed", type=int, default=20261102)
+    parser.add_argument("--name", default="dummy", help="ファイル名の接頭辞。--count 1 ならそのまま使う")
+    parser.add_argument("--crop", type=int, nargs=2, metavar=("W", "H"), help="図郭の一部だけを描く")
+    parser.add_argument("--font", help="日本語フォントのパス")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    args = parser.parse_args(argv)
+
+    cfg = yaml.safe_load(args.config.read_text(encoding="utf-8"))
+    source_cfg = cfg["source"]
+    chiban_re = re.compile(source_cfg["chiban_pattern"])
+    font_path = find_font_path(cfg["fonts"], args.font)
+    rng = random.Random(args.seed)
+
+    made = 0
+    for xml_bytes in iter_map_sources(args.source, source_cfg["coordinate_system"], args.seed):
+        if made >= args.count:
+            break
+        data = parse_map(xml_bytes)
+        sheet = pick_sheet(data, rng, source_cfg, chiban_re)
+        if sheet is None:
+            continue
+        parcels = [data.parcels[p] for p in sheet.parcel_ids if p in data.parcels]
+        drawable = [p for p in parcels if chiban_re.fullmatch(p.chiban)]
+        rendered = render_sheet(
+            sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=tuple(args.crop) if args.crop else None
+        )
+        name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
+        write_outputs(args.out, name, rendered, sheet, data, chiban_re)
+        height, width = rendered.image.shape[:2]
+        print(f"{name}: {width}x{height}px, 図郭 {sheet.number}, 注記 {len(rendered.labels)} 件")
+        made += 1
+
+    if made < args.count:
+        print(f"条件に合う図郭が足りません（{made}/{args.count}）", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

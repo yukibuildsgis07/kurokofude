@@ -1,0 +1,53 @@
+# ダミー図面生成の設定。図面の見た目に関わる数値はすべてここに置く
+source:
+  coordinate_system: 公共座標8系   # これと完全に一致する地図XMLだけ使う
+  scale_denominator: 500
+  min_parcels_in_sheet: 25         # 筆が少なすぎる図郭は使わない
+  chiban_pattern: '^\d{1,5}(-\d{1,4})?$'  # 数字の地番だけ描く（筆界未定地などは線のみ）
+
+render:
+  dpi: 200
+  margin_mm: 8
+  line_width_px: 2
+  frame_width_px: 3
+  chiban_height_mm: 3.0            # 文字の大きさ（フォントサイズ換算）
+  name_height_mm: 2.6
+  name_gap_mm: 0.5                 # 地番の下端と氏名の上端の間隔
+  label_clearance_px: 6            # 注記どうしの最小間隔
+  placement_search_step_px: 12     # 重なったときに位置をずらす幅
+  placement_search_rings: 5
+  slanted_ratio: 0.3               # 斜めの注記の割合
+  slant_min_deg: 12                # 斜めと呼ぶ最小角度
+  slant_max_deg: 40
+  crop_stride_px: 100              # 切り出し位置の探索間隔
+
+title_block:
+  width_px: 360
+  height_px: 110
+  padding_px: 16                   # 画像の右下隅からの距離
+  font_px: 20
+  line_px: 28
+  dates: ['R6.4.1', '2024/3/15', 'R5.11.20', '2023/9/1']
+
+scan:
+  skew_max_deg: 2.0
+  paper_color_rgb: [244, 239, 226]
+  paper_jitter: 5
+  ink_color_rgb: [28, 28, 30]
+  noise_sigma: 4.0
+  blur_sigma: 0.5
+  fade_grid: 24                    # かすれのムラの粗さ
+  fade_min: 0.72                   # 最もかすれた箇所のインク濃度
+
+fonts:                             # 上から順に探す。--font で上書き可
+  - /System/Library/Fonts/ヒラギノ角ゴシック W3.ttc
+  - C:/Windows/Fonts/YuGothM.ttc
+  - C:/Windows/Fonts/msgothic.ttc
+  - /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+
+# 氏名はこの2つの組み合わせで作る架空のもの
+names:
+  family: [青山, 石川, 上田, 岡本, 川村, 木下, 久保, 小島, 斎藤, 坂本, 島田, 杉山, 高木, 田村, 千葉,
+           土屋, 中川, 西村, 野口, 長谷川, 平野, 藤田, 本田, 松井, 三浦, 村上, 森下, 矢野, 山崎, 渡部]
+  given: [明, 一郎, 和子, 清, 恵子, 健二, 幸子, 茂, 俊夫, 直樹, 信子, 春江, 英雄, 洋子, 正男,
+          真理, 美智子, 光男, 恭子, 義雄, 良子, 亮介, 陽一, 千代, 文子]
