@@ -7,7 +7,7 @@ from pathlib import Path
 
 import tifffile
 
-from .detect import detect_chiban
+from .detect import classify_boxes
 from .mask import write_outputs
 from .ocr import run_ocr
 from .pair import pair_names
@@ -29,7 +29,15 @@ def image_size_of(path: Path) -> tuple[int, int]:
 
 def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> MaskSummary:
     boxes = run_ocr(in_path, config["ocr"], cache_dir)
-    chiban_boxes = detect_chiban(boxes, image_size_of(in_path), config)
-    pairs = pair_names(boxes, chiban_boxes, config["pair"])
-    out_path, _ = write_outputs(in_path, out_dir, chiban_boxes, pairs, config["mask"])
-    return MaskSummary(out_path, len(boxes), len(chiban_boxes), len(pairs))
+    classified = classify_boxes(boxes, image_size_of(in_path), config)
+    pairs = pair_names(classified.text, classified.chiban, config["pair"])
+    paired_ids = {id(pair.source) for pair in pairs}
+    unpaired = (
+        [box["quad"] for box in classified.text if id(box) not in paired_ids]
+        if config["mask"]["unpaired_text"]
+        else []
+    )
+    out_path, _ = write_outputs(
+        in_path, out_dir, classified.chiban, pairs, config["mask"], unpaired, classified.uncertain
+    )
+    return MaskSummary(out_path, len(boxes), len(classified.chiban), len(pairs) + len(unpaired))

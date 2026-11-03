@@ -10,7 +10,7 @@ import tifffile
 
 from kurokofude import ocr as ocr_module
 from kurokofude.config import load_config
-from kurokofude.detect import detect_chiban, normalize_text
+from kurokofude.detect import classify_boxes, normalize_text
 from kurokofude.evaluate import evaluate
 from kurokofude.geometry import angle_difference_deg, quad_frame
 from kurokofude.mask import fill_polygons, write_outputs
@@ -44,20 +44,24 @@ def test_normalize_text(raw, expected):
     assert normalize_text(raw) == expected
 
 
-def test_detect_keeps_chiban_and_rejects_others():
-    boxes = [
-        box(rect(100, 100, 60, 20), "123-4"),
-        box(rect(100, 200, 60, 20), "S=1:500"),
-        box(rect(100, 300, 60, 20), ""),
-        box(rect(900, 650, 60, 20), "2024"),  # 表題欄の領域
-        box(rect(100, 400, 90, 20), "123456"),  # 桁数オーバー
-    ]
-    assert [b["text"] for b in detect_chiban(boxes, IMAGE_SIZE, CONFIG)] == ["123-4"]
+def test_classify_splits_into_three_kinds():
+    chiban = box(rect(100, 100, 60, 20), "123-4")
+    misread = box(rect(100, 200, 60, 20), "273.19")
+    too_long = box(rect(100, 400, 90, 20), "123456")
+    name = box(rect(100, 300, 60, 20), "")
+    title = box(rect(900, 650, 60, 20), "2024")  # 表題欄の領域
+    title_name = box(rect(900, 620, 60, 20), "")
+    result = classify_boxes([chiban, misread, too_long, name, title, title_name], IMAGE_SIZE, CONFIG)
+    assert [b["text"] for b in result.chiban] == ["123-4"]
+    assert [b["text"] for b in result.uncertain] == ["273.19", "123456"]
+    assert result.text == [name]
 
 
-def test_detect_rejects_number_next_to_scale_symbol():
-    boxes = [box(rect(300, 100, 40, 20), "500"), box(rect(250, 100, 40, 20), "S=1:")]
-    assert detect_chiban(boxes, IMAGE_SIZE, CONFIG) == []
+def test_number_next_to_scale_symbol_is_not_chiban_but_is_kept():
+    number, symbol = box(rect(300, 100, 40, 20), "500"), box(rect(250, 100, 40, 20), "S=1:")
+    result = classify_boxes([number, symbol], IMAGE_SIZE, CONFIG)
+    assert result.chiban == []
+    assert number["text"] in [b["text"] for b in result.uncertain]
 
 
 # geometry
@@ -162,6 +166,19 @@ def test_refuses_to_overwrite_the_input(tmp_path):
     tifffile.imwrite(source, np.zeros((10, 10, 3), dtype=np.uint8), photometric="rgb")
     with pytest.raises(ValueError):
         write_outputs(source, tmp_path, [], [], CONFIG["mask"])
+
+
+def test_result_records_unpaired_and_uncertain(tmp_path):
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((60, 60, 3), 200, dtype=np.uint8), photometric="rgb")
+    uncertain = box(rect(10, 10, 8, 8), "273.19")
+    lone = rect(40, 40, 10, 10)
+    out_tif, result = write_outputs(source, tmp_path / "out", [], [], CONFIG["mask"], [lone], [uncertain])
+    assert result["masks"] == [{"quad": lone, "chiban": None, "status": "unpaired"}]
+    assert result["uncertain"][0]["status"] == "uncertain_chiban"
+    painted = tifffile.imread(out_tif)
+    assert painted[40, 40].tolist() == [0, 0, 0]
+    assert painted[10, 10].tolist() == [200, 200, 200]  # (b) は塗らない
 
 
 # evaluate
@@ -293,12 +310,12 @@ def test_fixture_has_no_name_strings(small_ocr):
 
 def test_pipeline_on_fixture_never_paints_chiban(small_ocr):
     truth = json.loads((FIXTURES / "sample_small.truth.json").read_text(encoding="utf-8"))
-    chiban_boxes = detect_chiban(small_ocr, tuple(truth["image_size"]), CONFIG)
-    assert chiban_boxes
-    pairs = pair_names(small_ocr, chiban_boxes, CONFIG["pair"])
+    classified = classify_boxes(small_ocr, tuple(truth["image_size"]), CONFIG)
+    assert classified.chiban
+    pairs = pair_names(classified.text, classified.chiban, CONFIG["pair"])
     assert pairs
     result = {
-        "chiban": [{"text": b["text"], "center": np.mean(b["quad"], axis=0).tolist()} for b in chiban_boxes],
+        "chiban": [{"text": b["text"], "center": np.mean(b["quad"], axis=0).tolist()} for b in classified.chiban],
         "masks": [{"quad": p.quad, "chiban": p.chiban["text"], "status": "auto"} for p in pairs],
     }
     assert evaluate(truth, result)["chiban_survival_pct"] == 100.0

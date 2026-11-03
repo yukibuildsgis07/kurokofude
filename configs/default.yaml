@@ -22,6 +22,7 @@ pair:
   cut_margin_px: 2
 mask:
   color: [0, 0, 0]      # 画像のチャンネル順（RGB）
+  unpaired_text: true   # 地番とペアにならない文字も塗る（迷ったら塗る、人が外す）
 protected_dirs:
   - data/raw
 hook_allowed_commands:   # 保護ディレクトリを含んでも Bash で通すコマンドの先頭（§4.1）

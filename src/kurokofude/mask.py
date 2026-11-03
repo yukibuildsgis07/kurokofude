@@ -15,6 +15,8 @@ from .pair import Pair
 GRAY_NDIM = 2
 WORLD_FILE_SUFFIX = ".tfw"
 STATUS_AUTO = "auto"
+STATUS_UNPAIRED = "unpaired"
+STATUS_UNCERTAIN_CHIBAN = "uncertain_chiban"
 # GeoTIFF のタグ：ModelPixelScale, ModelTiepoint, ModelTransformation, GeoKey×3, GDAL_METADATA, GDAL_NODATA
 GEO_TAG_CODES = (33550, 33922, 34264, 34735, 34736, 34737, 42112, 42113)
 
@@ -61,8 +63,15 @@ def write_masked_tiff(in_path: Path, out_path: Path, polygons: list, color) -> t
     return image.shape[1], image.shape[0]
 
 
-def build_result(source_name: str, image_size: tuple[int, int], chiban_boxes: list[dict], pairs: list[Pair]) -> dict:
-    """地番一覧 JSON（§2.4）。氏名の文字列は持たない。"""
+def build_result(
+    source_name: str,
+    image_size: tuple[int, int],
+    chiban_boxes: list[dict],
+    pairs: list[Pair],
+    unpaired: list[list],
+    uncertain: list[dict],
+) -> dict:
+    """地番一覧 JSON（§2.4、§11.1）。氏名の文字列は持たない。"""
     masked_ids = {id(pair.chiban) for pair in pairs}
     return {
         "source": source_name,
@@ -77,22 +86,34 @@ def build_result(source_name: str, image_size: tuple[int, int], chiban_boxes: li
             }
             for box in chiban_boxes
         ],
-        "masks": [{"quad": pair.quad, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for pair in pairs],
+        "uncertain": [
+            {"text": box["text"], "quad": box["quad"], "score": box["score"], "status": STATUS_UNCERTAIN_CHIBAN}
+            for box in uncertain
+        ],
+        "masks": [{"quad": pair.quad, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for pair in pairs]
+        + [{"quad": quad, "chiban": None, "status": STATUS_UNPAIRED} for quad in unpaired],
     }
 
 
 def write_outputs(
-    in_path: Path, out_dir: Path, chiban_boxes: list[dict], pairs: list[Pair], mask_cfg: dict
+    in_path: Path,
+    out_dir: Path,
+    chiban_boxes: list[dict],
+    pairs: list[Pair],
+    mask_cfg: dict,
+    unpaired: list[list] = (),
+    uncertain: list[dict] = (),
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
     if out_tif.resolve() == in_path.resolve():
         raise ValueError("出力先が入力と同じです。元の図面は上書きしません")
-    size = write_masked_tiff(in_path, out_tif, [pair.quad for pair in pairs], mask_cfg["color"])
+    polygons = [pair.quad for pair in pairs] + list(unpaired)
+    size = write_masked_tiff(in_path, out_tif, polygons, mask_cfg["color"])
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
         shutil.copyfile(world_file, out_dir / world_file.name)
-    result = build_result(in_path.name, size, chiban_boxes, pairs)
+    result = build_result(in_path.name, size, chiban_boxes, pairs, list(unpaired), list(uncertain))
     (out_dir / f"{in_path.stem}.chiban.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8"
     )

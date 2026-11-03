@@ -17,6 +17,7 @@ class Pair:
     chiban: dict
     quad: list[list[float]]  # 塗る多角形（切った後）
     distance: float
+    source: dict  # 元の OCR ボックス
 
 
 def gap_below(chiban: Frame, candidate_center: np.ndarray) -> float:
@@ -75,5 +76,5 @@ def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> l
         frame = quad_frame(chiban["quad"])
         quad = cut_at_chiban_bottom(candidate["quad"], frame, pair_cfg["cut_margin_px"])
         if quad:
-            pairs.append(Pair(chiban=chiban, quad=quad, distance=distance))
+            pairs.append(Pair(chiban=chiban, quad=quad, distance=distance, source=candidate))
     return pairs
