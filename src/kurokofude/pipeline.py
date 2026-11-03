@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import cv2
 import tifffile
 
 from .detect import classify_boxes
 from .mask import write_outputs
-from .ocr import run_ocr
+from .ocr import read_image_for_ocr, run_ocr
 from .pair import pair_names
+from .refine import refine_pair, refine_unpaired
 
 
 @dataclass
@@ -31,9 +33,12 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
     boxes = run_ocr(in_path, config["ocr"], cache_dir)
     classified = classify_boxes(boxes, image_size_of(in_path), config)
     pairs = pair_names(classified.text, classified.chiban, config["pair"])
+    gray = cv2.cvtColor(read_image_for_ocr(in_path), cv2.COLOR_BGR2GRAY)
+    for pair in pairs:
+        refine_pair(pair, gray, config["mask"])
     paired_ids = {id(pair.source) for pair in pairs}
     unpaired = (
-        [box["quad"] for box in classified.text if id(box) not in paired_ids]
+        [refine_unpaired(box["quad"], gray, config["mask"]) for box in classified.text if id(box) not in paired_ids]
         if config["mask"]["unpaired_text"]
         else []
     )

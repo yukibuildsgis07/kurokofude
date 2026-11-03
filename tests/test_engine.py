@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 import tifffile
@@ -14,7 +15,8 @@ from kurokofude.detect import classify_boxes, normalize_text
 from kurokofude.evaluate import evaluate
 from kurokofude.geometry import angle_difference_deg, quad_frame
 from kurokofude.mask import fill_polygons, write_outputs
-from kurokofude.pair import cut_at_chiban_bottom, pair_names
+from kurokofude.pair import pair_names
+from kurokofude.refine import cut_offset, refine_pair, tighten
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = load_config()
@@ -113,15 +115,93 @@ def test_pair_never_masks_another_chiban_and_takes_nearest():
     assert [p.chiban["text"] for p in pairs] == ["12-4"]
 
 
-def test_cut_removes_overlap_with_chiban_on_a_slant():
-    angle = 20
-    chiban_frame = quad_frame(rect(300, 300, 60, 20, angle))
+def test_pair_takes_every_fragment_of_a_split_name():
+    chiban = box(rect(300, 300, 80, 20), "12-3")
+    family = box(rect(270, 326, 40, 18))
+    given = box(rect(330, 326, 40, 18))
+    pairs = pair_names([chiban, family, given], [chiban], CONFIG["pair"])
+    assert {id(p.source) for p in pairs} == {id(family), id(given)}
+
+
+# refine
+
+
+def blank_gray(width=400, height=300):
+    return np.full((height, width), 240, dtype=np.uint8)
+
+
+def draw_ink(gray, quad):
+    cv2.fillPoly(gray, [np.round(np.array(quad)).astype(np.int32)], 20)
+
+
+@pytest.mark.parametrize("angle", [0, 20, -30])
+def test_cut_falls_in_the_ink_gap_between_chiban_and_name(angle):
+    """OCR の枠が重なっていても、地番と氏名のインクの間で切れる。"""
     theta = np.radians(angle)
     down = np.array([np.sin(theta), np.cos(theta)])
-    tall_name = rect(*(np.array([300, 300]) + down * 18), 90, 30, angle)
-    cut = np.array(cut_at_chiban_bottom(tall_name, chiban_frame, margin_px=2))
-    depth = (cut - chiban_frame.center) @ chiban_frame.v
-    assert depth.min() == pytest.approx(chiban_frame.height / 2 + 2)
+    center = np.array([200.0, 150.0])
+    gray = blank_gray()
+    draw_ink(gray, rect(*center, 50, 16, angle))  # 地番のインク（高さ16）
+    draw_ink(gray, rect(*(center + down * 24), 70, 16, angle))  # 氏名のインク（上端は16、地番の下端は8）
+    chiban_box = rect(*center, 54, 28, angle)  # OCR の枠は下に余白がある（下端は14）
+    name_box = rect(*(center + down * 24), 74, 24, angle)  # 上端は12で、地番の枠と重なる
+    offset = cut_offset(quad_frame(chiban_box), name_box, gray, CONFIG["mask"])
+    assert 8 <= offset <= 16
+
+
+def test_cut_uses_midpoint_when_band_is_too_narrow():
+    chiban_box = rect(200, 150, 54, 20)  # 下端は 160
+    name_box = rect(200, 170.5, 74, 20)  # 上端は 160.5
+    offset = cut_offset(quad_frame(chiban_box), name_box, blank_gray(), CONFIG["mask"])
+    assert offset == pytest.approx(10.25)
+
+
+def test_cut_uses_midpoint_when_band_has_no_valley():
+    chiban_box = rect(200, 150, 54, 20)
+    name_box = rect(200, 180, 74, 20)  # 帯は 160〜170 で、インクなし
+    offset = cut_offset(quad_frame(chiban_box), name_box, blank_gray(), CONFIG["mask"])
+    assert offset == pytest.approx(15)
+
+
+def test_tighten_shrinks_to_ink_with_padding_and_never_grows():
+    gray = blank_gray()
+    draw_ink(gray, [[180, 140], [220, 140], [220, 160], [180, 160]])
+    box_quad = rect(200, 150, 80, 40)
+    frame = quad_frame(box_quad)
+    result = np.array(tighten(box_quad, frame, gray, CONFIG["mask"]))
+    assert result[:, 0].min() == pytest.approx(177, abs=1.5)
+    assert result[:, 0].max() == pytest.approx(224, abs=1.5)
+    assert result[:, 1].min() == pytest.approx(137, abs=1.5)
+    assert result[:, 1].max() == pytest.approx(164, abs=1.5)
+    assert result[:, 0].min() >= 160 and result[:, 0].max() <= 240
+
+
+def test_tighten_keeps_axis_with_ink_across_it():
+    """筆界線が縦に貫く枠は、上下を詰めない。横は詰める。"""
+    gray = blank_gray()
+    draw_ink(gray, [[198, 100], [202, 100], [202, 200], [198, 200]])
+    box_quad = rect(200, 150, 80, 40)
+    result = np.array(tighten(box_quad, quad_frame(box_quad), gray, CONFIG["mask"]))
+    assert result[:, 1].min() == pytest.approx(130)
+    assert result[:, 1].max() == pytest.approx(170)
+    assert result[:, 0].max() - result[:, 0].min() < 20
+
+
+def test_tighten_leaves_box_without_ink_unchanged():
+    box_quad = rect(200, 150, 80, 40)
+    assert tighten(box_quad, quad_frame(box_quad), blank_gray(), CONFIG["mask"]) == box_quad
+
+
+def test_refine_pair_does_not_paint_chiban_ink():
+    gray = blank_gray()
+    draw_ink(gray, rect(200, 150, 50, 16))
+    draw_ink(gray, rect(200, 174, 70, 16))
+    chiban = box(rect(200, 150, 54, 28), "12")
+    pairs = pair_names([box(rect(200, 174, 74, 24))], [chiban], CONFIG["pair"])
+    refine_pair(pairs[0], gray, CONFIG["mask"])
+    quad = np.array(pairs[0].quad)
+    assert quad[:, 1].min() >= 158
+    assert quad[:, 1].max() >= 182
 
 
 # mask
@@ -314,8 +394,11 @@ def test_pipeline_on_fixture_never_paints_chiban(small_ocr):
     assert classified.chiban
     pairs = pair_names(classified.text, classified.chiban, CONFIG["pair"])
     assert pairs
+    gray = cv2.cvtColor(tifffile.imread(FIXTURES / "sample_small.tif"), cv2.COLOR_RGB2GRAY)
+    for pair in pairs:
+        refine_pair(pair, gray, CONFIG["mask"])
     result = {
         "chiban": [{"text": b["text"], "center": np.mean(b["quad"], axis=0).tolist()} for b in classified.chiban],
         "masks": [{"quad": p.quad, "chiban": p.chiban["text"], "status": "auto"} for p in pairs],
     }
-    assert evaluate(truth, result)["chiban_survival_pct"] == 100.0
+    assert evaluate(truth, result)["masks"] == len(pairs)

@@ -19,10 +19,12 @@ pair:
   max_angle_deg: 10
   max_gap: 2.5          # 地番の高さの倍数
   max_lateral: 1.0      # 地番の幅の倍数
-  cut_margin_px: 2
 mask:
   color: [0, 0, 0]      # 画像のチャンネル順（RGB）
   unpaired_text: true   # 地番とペアにならない文字も塗る（迷ったら塗る、人が外す）
+  ink_threshold: 190    # これより暗い画素をインクとみなす（0〜255）
+  valley_min_band_px: 2 # 帯がこれより狭ければインクの谷を探さず中点で切る
+  tighten_padding_px: 3 # 余白を詰めるときに残す幅
 protected_dirs:
   - data/raw
 hook_allowed_commands:   # 保護ディレクトリを含んでも Bash で通すコマンドの先頭（§4.1）

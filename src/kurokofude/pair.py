@@ -9,13 +9,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .geometry import Frame, angle_difference_deg, clip_below_line, intervals_overlap, project_interval, quad_frame
+from .geometry import Frame, angle_difference_deg, intervals_overlap, project_interval, quad_frame
 
 
 @dataclass
 class Pair:
     chiban: dict
-    quad: list[list[float]]  # 塗る多角形（切った後）
+    quad: list[list[float]]  # 塗る多角形。refine.py が切って詰める
     distance: float
     source: dict  # 元の OCR ボックス
 
@@ -41,12 +41,6 @@ def is_candidate(chiban: Frame, quad, pair_cfg: dict) -> tuple[bool, float]:
     return True, distance
 
 
-def cut_at_chiban_bottom(quad, chiban: Frame, margin_px: float) -> list[list[float]]:
-    """候補の上側を、地番の下辺を延ばした直線（＋余白）で切る。"""
-    line_point = chiban.center + chiban.v * (chiban.height / 2 + margin_px)
-    return clip_below_line(quad, line_point, chiban.v)
-
-
 def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> list[Pair]:
     """条件を満たす枠を全部、その地番の氏名群とする（§11.2）。1つの枠は最も近い地番に渡す。"""
     chiban_ids = {id(box) for box in chiban_boxes}
@@ -65,10 +59,7 @@ def pair_names(boxes: list[dict], chiban_boxes: list[dict], pair_cfg: dict) -> l
             if ok and (current is None or distance < current[0]):
                 nearest[id(candidate)] = (distance, chiban, candidate)
 
-    pairs = []
-    for distance, chiban, candidate in nearest.values():
-        frame = quad_frame(chiban["quad"])
-        quad = cut_at_chiban_bottom(candidate["quad"], frame, pair_cfg["cut_margin_px"])
-        if quad:
-            pairs.append(Pair(chiban=chiban, quad=quad, distance=distance, source=candidate))
-    return pairs
+    return [
+        Pair(chiban=chiban, quad=candidate["quad"], distance=distance, source=candidate)
+        for distance, chiban, candidate in nearest.values()
+    ]
