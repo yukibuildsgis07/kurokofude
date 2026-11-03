@@ -11,8 +11,8 @@ requires-python = ">=3.11,<3.12"
 license = { text = "MIT" }
 dependencies = [
   "paddlepaddle",
-  "paddleocr",
-  "opencv-python-headless",
+  "paddleocr>=3",
+  "setuptools",
   "numpy",
   "tifffile",
   "pyyaml",

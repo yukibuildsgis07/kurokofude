@@ -3,10 +3,15 @@ ocr:
   enable_mkldnn: false
   max_side: 4000        # これを超えたらタイル分割
   tile_overlap: 200
+  tile_merge_iou: 0.5   # タイル境界の二重検出を統合するしきい値
+  # これに一致しない文字列（氏名など）はOCR直後に捨てる。地番の読み違いと縮尺・日付の記号だけ通す
+  keep_text_pattern: '^[0-9０-９OoIl|ー−–\-SsRrHh=:：/.\s]*$'
 chiban:
   pattern: '^\d{1,5}(-\d{1,4})?$'
   min_digits: 1
   max_digits: 5
+  decoy_pattern: '[:：=]'      # 近くにこれがあれば縮尺などとみなす
+  decoy_neighbor_distance: 3.0  # 地番の高さの倍数
 exclude_regions:        # 画像に対する相対座標 [x0, y0, x1, y1]
   - [0.6, 0.8, 1.0, 1.0]   # 右下の表題欄
 pair:
@@ -15,6 +20,6 @@ pair:
   max_lateral: 1.0      # 地番の幅の倍数
   cut_margin_px: 2
 mask:
-  color: [0, 0, 0]
+  color: [0, 0, 0]      # 画像のチャンネル順（RGB）
 protected_dirs:
   - data/raw
