@@ -22,9 +22,6 @@ render:
   leader_width_px: 1
   placement_search_step_px: 12     # 線と重ねて置くときに位置をずらす幅
   placement_search_rings: 5
-  slanted_ratio: 0.3               # 斜めの注記の割合
-  slant_min_deg: 12                # 斜めと呼ぶ最小角度
-  slant_max_deg: 40
   crop_stride_px: 100              # 切り出し位置の探索間隔
 
 title_block:

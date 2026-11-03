@@ -543,6 +543,28 @@ def test_evaluate_reports_scores_excluding_line_overlaps():
     assert scores["excluding_line_overlaps"]["truth_items"] == 1
 
 
+def test_evaluate_reports_scores_by_placement():
+    flat_chiban, flat_name = rect(30, 20, 20, 10), rect(30, 40, 40, 10)
+    turned_chiban, turned_name = rect(90, 20, 20, 10), rect(90, 40, 40, 10)
+    truth = {
+        "items": [
+            {**truth_item(flat_chiban, flat_name), "placement": "horizontal"},
+            {**truth_item(turned_chiban, turned_name), "placement": "rotated"},
+        ]
+    }
+    result = {"chiban": [], "masks": [{"quad": flat_name, "chiban": None, "status": "unpaired"}]}
+    scores = evaluate(truth, result, gray_with_ink(flat_chiban), THRESHOLD, MARGIN)
+    assert scores["by_placement"]["horizontal"]["name_coverage_pct"] == 100.0
+    assert scores["by_placement"]["rotated"]["name_coverage_pct"] == 0.0
+    assert scores["by_placement"]["rotated"]["truth_items"] == 1
+    assert "leader" not in scores["by_placement"]
+
+
+def test_average_scores_skips_rows_without_the_key():
+    rows = [{"by": {"rotated": {"a": 10.0}}}, {"by": {"leader": {"a": 2.0}}}, {"by": {"rotated": {"a": 20.0}}}]
+    assert average_scores(rows) == {"by": {"rotated": {"a": 15.0}, "leader": {"a": 2.0}}}
+
+
 def test_average_scores_handles_nested_values():
     rows = [{"a": 1.0, "b": {"c": 2.0}}, {"a": 3.0, "b": {"c": 4.0}}]
     assert average_scores(rows) == {"a": 2.0, "b": {"c": 3.0}}

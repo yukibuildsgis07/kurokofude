@@ -113,7 +113,6 @@ def test_quad_order_and_down_direction():
 def test_fixture_truth_has_slanted_labels_and_no_place_names():
     truth = json.loads((ROOT / "tests" / "fixtures" / "sample_small.truth.json").read_text(encoding="utf-8"))
     assert truth["image_size"] == [1000, 700]
-    assert any(item["slanted"] for item in truth["items"])
     assert all(len(item["name"]["quad"]) == 4 for item in truth["items"])
     lengths = [len(item["chiban"]["text"]) for item in truth["items"]]
     assert 1 in lengths and 2 in lengths
@@ -124,9 +123,6 @@ def test_fixture_truth_has_slanted_labels_and_no_place_names():
 NAMES = {"family": ["AA"], "given": ["BB"]}
 LAYOUT_CFG = {
     "label_clearance_px": 6,
-    "slanted_ratio": 0.0,
-    "slant_min_deg": 12,
-    "slant_max_deg": 40,
     "inside_search_step_px": 10,
     "leader_search_step_px": 16,
     "leader_max_distance_px": 320,
@@ -153,6 +149,8 @@ def test_label_fits_inside_parcel_without_touching_its_lines():
     polygon = square(100, 100, 300, 200)
     label = lay_out([polygon])[0]
     assert not label.overlaps_line and label.leader is None
+    assert label.placement == "horizontal"
+    assert label.angle_deg == 0.0
     text = Polygon(label.chiban_quad).union(Polygon(label.name_quad))
     assert Polygon(polygon).contains(text)
     assert not text.intersects(LineString(polygon + polygon[:1]))
@@ -162,6 +160,8 @@ def test_narrow_parcel_gets_a_leader_from_inside_to_label_edge():
     polygon = square(400, 100, 20, 300)
     label = lay_out([polygon])[0]
     assert not label.overlaps_line
+    assert label.placement == "leader"
+    assert label.angle_deg == 0.0
     assert label.leader is not None
     start, end = label.leader
     text = Polygon(label.chiban_quad).union(Polygon(label.name_quad))
@@ -177,12 +177,34 @@ def test_overlap_is_recorded_only_when_nothing_else_works():
     label = lay_out([polygon], lines=grid)[0]
     assert label.overlaps_line is True
     assert label.leader is None
+    assert label.placement == "horizontal"
+
+
+def test_slanted_narrow_parcel_rotates_along_its_long_axis():
+    """水平では入らない斜めの細長い筆は、筆の長軸に回す。氏名も同じ角度で真下に並ぶ。"""
+    polygon = list(np.array(Polygon(square(-250, -36, 500, 72)).exterior.coords)[:-1])
+    theta = np.radians(30)
+    rotation = np.array([[np.cos(theta), np.sin(theta)], [-np.sin(theta), np.cos(theta)]])  # 見た目で反時計回りに30度
+    corners = [tuple(rotation @ np.array(p) + (400, 300)) for p in polygon]
+    label = lay_out([corners])[0]
+    assert label.placement == "rotated"
+    assert label.angle_deg == pytest.approx(30, abs=0.5)
+    assert Polygon(corners).contains(Polygon(label.chiban_quad).union(Polygon(label.name_quad)))
+    _, down = render.text_vectors(label.angle_deg)
+    offset = label.name_quad.mean(axis=0) - label.chiban_quad.mean(axis=0)
+    assert abs(offset @ np.array([down[1], -down[0]])) < 1e-6  # 真下
+
+
+def test_labels_never_get_random_rotation_in_wide_parcels():
+    polygons = [square(20 + 260 * i, 50, 240, 200) for i in range(3)]
+    assert all(label.angle_deg == 0.0 for label in lay_out(polygons))
 
 
 def test_fixture_truth_records_placement():
     truth = json.loads((ROOT / "tests" / "fixtures" / "sample_small.truth.json").read_text(encoding="utf-8"))
     assert all(isinstance(item["overlaps_line"], bool) for item in truth["items"])
-    assert all(isinstance(item["leader"], bool) for item in truth["items"])
+    assert {item["placement"] for item in truth["items"]} <= {"horizontal", "rotated", "leader"}
+    assert any(item["placement"] == "rotated" for item in truth["items"])
 
 
 @pytest.mark.parametrize("shape", [(2488, 3276), (700, 1000)])

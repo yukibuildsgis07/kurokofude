@@ -24,6 +24,10 @@ MAX_MIN_RECT_SIDES = 4
 HALF_TURN_DEG = 180
 QUARTER_TURN_DEG = 90
 SHORT_CHIBAN_MAX_LEN = 2
+HORIZONTAL_DEG = 0.0
+PLACEMENT_HORIZONTAL = "horizontal"
+PLACEMENT_ROTATED = "rotated"
+PLACEMENT_LEADER = "leader"
 
 
 @dataclass
@@ -31,7 +35,7 @@ class Label:
     chiban: str
     name: str
     angle_deg: float
-    slanted: bool
+    placement: str  # horizontal / rotated / leader
     chiban_quad: np.ndarray
     name_quad: np.ndarray
     overlaps_line: bool = False
@@ -164,18 +168,6 @@ def parcel_angle(polygon_px: Polygon) -> float:
     return angle
 
 
-def choose_angle(polygon_px: Polygon, rng: random.Random, cfg: dict) -> tuple[float, bool]:
-    if rng.random() >= cfg["slanted_ratio"]:
-        return 0.0, False
-    angle = parcel_angle(polygon_px)
-    magnitude = abs(angle)
-    if magnitude > cfg["slant_max_deg"] or magnitude < cfg["slant_min_deg"]:
-        # 筆の向きが読める範囲にないときは、範囲内の角度を振る（文字を倒しすぎない）
-        magnitude = rng.uniform(cfg["slant_min_deg"], cfg["slant_max_deg"])
-        angle = magnitude if rng.random() < 0.5 else -magnitude
-    return angle, True
-
-
 def fake_name(rng: random.Random, names: dict) -> str:
     return rng.choice(names["family"]) + "　" + rng.choice(names["given"])
 
@@ -196,7 +188,7 @@ class _Plan:
     polygon: Polygon  # 画素座標の筆（画像内に切り抜いたもの）
     anchor: np.ndarray  # 筆の内側の点
     name: str
-    angle_options: list[tuple[float, bool]]  # 試す角度と、斜めかどうか
+    long_axis_deg: float  # 筆の長軸の角度
     chiban_size: tuple[float, float]
     name_size: tuple[float, float]
 
@@ -230,7 +222,7 @@ class _Layout:
         return self.lines.intersects(block)
 
 
-def _make_plan(parcel, world_to_px, canvas, chiban_font, name_font, rng, render_cfg, names) -> _Plan | None:
+def _make_plan(parcel, world_to_px, canvas, chiban_font, name_font, rng, names) -> _Plan | None:
     polygon_px = Polygon(apply_affine(world_to_px, np.array(parcel.polygon.exterior.coords)))
     if not polygon_px.is_valid:
         polygon_px = polygon_px.buffer(0)
@@ -239,45 +231,38 @@ def _make_plan(parcel, world_to_px, canvas, chiban_font, name_font, rng, render_
         return None
     point = visible.representative_point()
     name = fake_name(rng, names)
-    angle, slanted = choose_angle(polygon_px, rng, render_cfg)
-    options = [(angle, slanted)]
-    along_parcel = parcel_angle(polygon_px)
-    if not slanted and abs(along_parcel) <= render_cfg["slant_max_deg"]:
-        options.append((along_parcel, abs(along_parcel) >= render_cfg["slant_min_deg"]))  # 細長い筆は筆の向きに書く
     return _Plan(
         parcel,
         visible,
         np.array([point.x, point.y]),
         name,
-        options,
+        parcel_angle(polygon_px),
         text_extent(chiban_font, parcel.chiban),
         text_extent(name_font, name),
     )
 
 
-def _place_inside(plan: _Plan, layout: _Layout, step: int) -> Label | None:
-    """筆の内側で、線と交差しない位置を代表点に近い順に探す。"""
+def _place_inside(plan: _Plan, layout: _Layout, step: int, angle: float, placement: str) -> Label | None:
+    """筆の内側で、線にも他の注記にも重ならない位置を代表点に近い順に探す。"""
     min_x, min_y, max_x, max_y = plan.polygon.bounds
     grid = np.array(
         [(x, y) for y in np.arange(min_y, max_y, step) for x in np.arange(min_x, max_x, step)], dtype=float
     ).reshape(-1, 2)
     points = np.vstack([plan.anchor, grid[np.argsort(np.linalg.norm(grid - plan.anchor, axis=1))]])
     inside = prep(plan.polygon)
-    for angle, slanted in plan.angle_options:
-        for center in points:
-            chiban_quad, name_quad = layout.quads(plan, center, angle)
-            block = layout.block(chiban_quad, name_quad)
-            if inside.contains(block) and not layout.crosses_line(block) and layout.is_free(block):
-                layout.taken.append(block)
-                return Label(plan.parcel.chiban, plan.name, angle, slanted, chiban_quad, name_quad)
+    for center in points:
+        chiban_quad, name_quad = layout.quads(plan, center, angle)
+        block = layout.block(chiban_quad, name_quad)
+        if inside.contains(block) and not layout.crosses_line(block) and layout.is_free(block):
+            layout.taken.append(block)
+            return Label(plan.parcel.chiban, plan.name, angle, placement, chiban_quad, name_quad)
     return None
 
 
 def _place_with_leader(plan: _Plan, layout: _Layout, step: int, rings: int) -> Label | None:
-    """筆の外の空いた場所に置き、筆の内側の点から文字枠の端まで引き出し線を引く。"""
-    angle, slanted = plan.angle_options[0]
+    """筆の外の空いた場所に水平で置き、筆の内側の点から文字枠の端まで引き出し線を引く。"""
     for offset in search_offsets(step, rings):
-        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, angle)
+        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, HORIZONTAL_DEG)
         block = layout.block(chiban_quad, name_quad)
         if layout.crosses_line(block) or not layout.is_free(block):
             continue
@@ -290,8 +275,8 @@ def _place_with_leader(plan: _Plan, layout: _Layout, step: int, rings: int) -> L
         return Label(
             plan.parcel.chiban,
             plan.name,
-            angle,
-            slanted,
+            HORIZONTAL_DEG,
+            PLACEMENT_LEADER,
             chiban_quad,
             name_quad,
             leader=np.array(leader.coords),
@@ -300,15 +285,21 @@ def _place_with_leader(plan: _Plan, layout: _Layout, step: int, rings: int) -> L
 
 
 def _place_over_line(plan: _Plan, layout: _Layout, step: int, rings: int) -> Label | None:
-    """どうしても置けないときだけ、線と重ねて置く。"""
-    angle, slanted = plan.angle_options[0]
+    """どうしても置けないときだけ、水平で線と重ねて置く。"""
     for offset in search_offsets(step, rings):
-        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, angle)
+        chiban_quad, name_quad = layout.quads(plan, plan.anchor + offset, HORIZONTAL_DEG)
         block = layout.block(chiban_quad, name_quad)
         if layout.is_free(block):
             layout.taken.append(block)
-            overlaps = layout.crosses_line(block)
-            return Label(plan.parcel.chiban, plan.name, angle, slanted, chiban_quad, name_quad, overlaps_line=overlaps)
+            return Label(
+                plan.parcel.chiban,
+                plan.name,
+                HORIZONTAL_DEG,
+                PLACEMENT_HORIZONTAL,
+                chiban_quad,
+                name_quad,
+                overlaps_line=layout.crosses_line(block),
+            )
     return None
 
 
@@ -325,20 +316,20 @@ def layout_labels(
     render_cfg: dict,
     names: dict,
 ) -> list[Label]:
-    """全筆で内側を先に試し、余った筆に引き出し線、最後に線との重なりを許す（§11.10）。"""
+    """全筆で水平を試し、余った筆を筆の長軸に回し、次に引き出し線、最後に線との重なりを許す（§14）。"""
     canvas = box(0, 0, size[0], size[1])
     layout = _Layout(size, keep_out, lines, render_cfg["label_clearance_px"], gap_px)
     plans = [
         plan
-        for plan in (
-            _make_plan(p, world_to_px, canvas, chiban_font, name_font, rng, render_cfg, names) for p in parcels
-        )
+        for plan in (_make_plan(p, world_to_px, canvas, chiban_font, name_font, rng, names) for p in parcels)
         if plan is not None
     ]
+    inside_step = render_cfg["inside_search_step_px"]
     leader_step = render_cfg["leader_search_step_px"]
     leader_rings = render_cfg["leader_max_distance_px"] // leader_step
     stages = [
-        lambda plan: _place_inside(plan, layout, render_cfg["inside_search_step_px"]),
+        lambda plan: _place_inside(plan, layout, inside_step, HORIZONTAL_DEG, PLACEMENT_HORIZONTAL),
+        lambda plan: _place_inside(plan, layout, inside_step, plan.long_axis_deg, PLACEMENT_ROTATED),
         lambda plan: _place_with_leader(plan, layout, leader_step, leader_rings),
         lambda plan: _place_over_line(
             plan, layout, render_cfg["placement_search_step_px"], render_cfg["placement_search_rings"]

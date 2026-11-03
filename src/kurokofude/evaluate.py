@@ -86,13 +86,19 @@ def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int, ov
         "mixed_masked": sum(1 for m in result["masks"] if m.get("status") == STATUS_MIXED_MASKED),
         "uncertain_chiban": len(result.get("uncertain", [])),
         "excluding_line_overlaps": _item_scores(clear_items, masks_geometry, detected, ink, painted),
+        "by_placement": {
+            kind: _item_scores(
+                [item for item in items if item.get("placement") == kind], masks_geometry, detected, ink, painted
+            )
+            for kind in sorted({item["placement"] for item in items if "placement" in item})
+        },
     }
 
 
 def average_scores(rows: list[dict]) -> dict:
-    """数値の項目を平均する。入れ子の項目も同じように平均する。"""
+    """数値の項目を平均する。入れ子の項目も同じように平均する。項目がない行は数えない。"""
     averaged = {}
-    for key in rows[0]:
-        values = [row[key] for row in rows]
+    for key in dict.fromkeys(key for row in rows for key in row):
+        values = [row[key] for row in rows if key in row]
         averaged[key] = average_scores(values) if isinstance(values[0], dict) else round(sum(values) / len(values), 2)
     return averaged
