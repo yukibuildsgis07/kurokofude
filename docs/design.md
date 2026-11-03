@@ -135,6 +135,38 @@ kurokofude eval  --truth <truth.json> --result <chiban.json>
 - 操作：四角形クリックで外す／ドラッグで四角形を追加（傾きは近傍の地番に合わせる、なければ水平）／「確定」で `mask.py` を再実行し `status` を更新
 - 確定後にだけ `data/masked/` に書く設計にすると流れがきれいだが、①単体でも動くよう `mask` は自動で出力し、②は上書きする
 
+### 3.1 2026-11-04 追記（Fable 判断。上より優先）
+
+**確認画面は人の道具で、Claude の道具ではない。**
+- `open_review(masked_path)` は URL を返さない。確認画面のサーバーを起動してブラウザを直接開き（`webbrowser.open`）、`{"opened": bool, "confirmed": bool}` だけ返す。`mask_drawing` も URL を返さない
+- サーバーは `127.0.0.1` にだけ bind する。ポートは `review.port`（8765）
+- フックは、`localhost`／`127.0.0.1` と確認画面のポートの両方を含む Bash のコマンド（curl 等）を止める。実装の補足：同じ条件で WebFetch の `url` も止める（フックの対象に WebFetch を足す）
+
+**画面**
+- 塗る前の画像を PNG に変換して表示する。元の TIFF は変えない。表示用の PNG は `data/cache/raw/<画像の SHA-256>.png` に置く。実装の補足：PNG は塗る前の画像そのものなので、置き場所の名前に `raw` を含めてフック（部品名 `raw` で止まる）が効くようにし、deny 設定にも足す
+- パン・ズームできる canvas に、塗り（多角形、頂点数可変）を半透明で重ねる。色は status ごと：`auto` / `unpaired` / `in_title_block` / `mixed_masked` / `split` / `added`。`removed` は破線の枠だけ
+- `uncertain_chiban` の枠は塗らずに枠線だけ表示する
+- 塗る前の図面は、`chiban.json` の `source`（ファイル名）を保護ディレクトリの中から探す。`chiban.json` に塗る前のパスは書かない
+
+**操作**
+- 塗りをクリックで外す（`removed`）、もう一度で元の status に戻す。元の status は `origin` に残す
+- Shift＋ドラッグで四角形を追加（`added`）。角度はドラッグを始めた点に最も近い地番の枠（OCR の四角形の1辺目）に合わせ、地番がなければ水平。ふつうのドラッグはパン、ホイールはズーム
+- `uncertain_chiban` の枠をクリックすると「塗る」になる（`added`、`origin: "uncertain_chiban"`）。もう一度で戻す
+- 「確定」：`masks[].status` を更新する（`removed` と `added` 以外は `confirmed`。元の status は `origin`）。塗る前の図面から塗り直して `data/masked/` を上書きし（`.tfw` もコピー）、`chiban.json` に `"confirmed": true` と確定時刻 `confirmed_at` を書く。確定後に保存し直すと `confirmed` は `false` に戻る
+- 確定の塗り直しでは、地番の保護（§12.2）をかけない。人が決めた塗りをそのまま塗る
+
+**API**（テストは TestClient で行う。画面の JS はテストしない）
+- `GET /api/drawings`：`data/masked/` の一覧
+- `GET /api/drawings/{name}`：`chiban.json` の中身
+- `GET /api/drawings/{name}/image`：表示用の PNG
+- `PUT /api/drawings/{name}`：`masks` を保存（status は既知のものだけ、多角形は3点以上）
+- `POST /api/drawings/{name}/confirm`：確定
+
+**その他**
+- CLI：`kurokofude review <masked.tif>` でも同じ画面を開く
+- FastAPI＋HTML 1枚。外部の JS ライブラリも CDN も使わない（オフラインの会社 PC で動くように）
+- Windows でも動くこと（パスは pathlib、ブラウザは `webbrowser`）
+
 ---
 
 ## 4. ③ 関所（フック）＋MCPサーバー
@@ -160,12 +192,15 @@ kurokofude eval  --truth <truth.json> --result <chiban.json>
 ### 4.3 デモでの見せ方（10秒）
 「`data/raw/図面.tif` を読んで」→ フックで止まる → Claudeが `mask_drawing` を使う → 塗った図面と地番一覧だけが返る。
 
+2026-11-04 追記（Fable 判断）：スキルがあると Claude は最初から `mask_drawing` を使い、フックの場面が出ない。デモは別撮りで、「cat で開いて」→ フックで止まる、次に「地番を教えて」→ スキルが `mask_drawing` を使う、の順に並べる。指示文は `docs/demo_prompt.txt`。
+
 ---
 
 ## 5. ④ 一連の流れ（できれば）
 - スキル `georef`：「この図面を幾何補正して」→ mask_drawing → 人の確認待ち → サブエージェント `matcher` に地番一覧と公図GeoJSONを渡す → ワールドファイル作成
 - `matcher`：地番文字列で公図の筆を引き当て、画素座標（center）と公共座標（筆ポリゴンの重心）のペアを作る。3組以上で**相似変換**（回転・拡大縮小・平行移動）を最小二乗で解く。残差の大きいペアを外して再計算（RANSAC風）。結果を `.tfw` として書き出し、残差一覧を報告
 - デモ：わざとずらした図面が、地番の照合で正しい位置に戻る
+- 2026-11-04 追記（Fable 判断）：OCR はハイフンを落とすことがある（`273-9` → `2739`）。エンジンでは扱わない。`matcher` は、公図に無い地番について、ハイフンを挿した候補（`2739` → `2-739`、`27-39`、`273-9`）のうち公図にあるものに読み替え、score を下げて使う
 
 ---
 
