@@ -1,0 +1,7 @@
+# ④ 照合とワールドファイル作成（設計書 §5）の設定
+min_pairs: 3                 # これより少ないペアでは変換を出さない
+ransac_tolerance_m: 15.0     # 変換後の地番の位置と筆の重心のずれがこれ以内なら一致とみなす（m）
+reread_score_factor: 0.8     # ハイフンを挿して読み替えた地番の score に掛ける
+max_pair_candidates: 4000    # RANSAC で試す2組の候補の上限
+seed: 20261104
+footprint_iterations: 3       # 筆を画像の範囲で切った重心で解き直す回数（0 で §5 のとおり筆全体の重心）

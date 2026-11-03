@@ -113,9 +113,9 @@ def write_outputs(
     for directory in (out_dir, truth_dir, ref_dir):
         directory.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(out_dir / f"{name}.tif", rendered.image, photometric="rgb")
-    (out_dir / f"{name}.tfw").write_text(
-        "\n".join(f"{value:.10f}" for value in rendered.world_file) + "\n", encoding="ascii"
-    )
+    world_file_text = "\n".join(f"{value:.10f}" for value in rendered.world_file) + "\n"
+    (out_dir / f"{name}.tfw").write_text(world_file_text, encoding="ascii")
+    (truth_dir / f"{name}.tfw").write_text(world_file_text, encoding="ascii")  # 照合の検証用の正解（§5）
     height, width = rendered.image.shape[:2]
     (truth_dir / f"{name}.truth.json").write_text(
         json.dumps(truth_json(name, (width, height), sheet, rendered.labels), ensure_ascii=False, indent=1),
