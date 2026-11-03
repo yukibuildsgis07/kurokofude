@@ -54,6 +54,7 @@ kurokofude/
   data/
     raw/        # 塗る前（関所の対象。Claudeは読めない）
     masked/     # 塗った後（Claudeが見てよいのはここだけ）
+    truth/      # 正解データ（氏名の文字列なし。§6）
     cache/      # OCR結果キャッシュ
   docs/
     design.md             # この文書
@@ -143,6 +144,7 @@ kurokofude eval  --truth <truth.json> --result <chiban.json>
 - ツール入力（file_path / pattern / command / path）に `raw/`（または設定した保護ディレクトリ）が含まれたら **終了コード2** で止め、stderrに「このファイルは黒子筆を通す前の図面です。`mask_drawing` ツールを使ってください」と返す
 - 判定は正規化したパスで行う（`../` や絶対パスでの迂回を防ぐ）
 - フックはプロジェクトの `.claude/settings.json` に置き、リポジトリに含める（利用者がcloneすれば効く）
+- 2026-11-03 追記（Fable 判断）：Bash には許可リストを設ける。`configs/default.yaml` の `hook_allowed_commands`（`kurokofude mask`、`kurokofude batch`、`python tools/make_dummy/make.py`）で始まるコマンドは、保護ディレクトリを含んでも通す。それ以外は止める。語の単位で先頭を比べ（`kurokofude maskx` は不可）、`;` `&` `|` `<` `>` `` ` `` `$` `(` `)` 改行を含むものは許可しない（後ろに別のコマンドをつなぐ抜け道を防ぐ）。Read など Bash 以外のツールに許可リストはない
 
 ### 4.2 MCPサーバー（mcp_server.py、Python SDK FastMCP、stdio）
 ツールは3つだけ。**どのツールも生画像のバイト列・パスを返さない。**
@@ -174,6 +176,7 @@ kurokofude eval  --truth <truth.json> --result <chiban.json>
 - スキャン風加工：全体の微小回転（±2°）、ガウスノイズ、かすれ、紙の色
 - 出力：`.tif`、`.tfw`（元の公共座標から計算）、`.truth.json`（地番・氏名それぞれの傾いた四角形の4頂点、文字列）
 - 表題欄（縮尺 `1:500`、日付、図郭番号）を右下に入れ、誤検出のテストにする
+- 2026-11-03 追記（Fable 判断）：正解データは `data/truth/`（`raw/` の外）に置く。`.truth.json` に氏名の文字列は入れず、氏名は四角形の4頂点だけ、地番は四角形の4頂点と文字列を保存する。上の「文字列」はこの変更で地番だけになる
 - README に「出典：法務省 登記所備付地図データ（G空間情報センター）を加工して作成」「氏名はすべて架空」を明記
 - **変換・画像化のコードは11月2日以降に新規に書く**
 

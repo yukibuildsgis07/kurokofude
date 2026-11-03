@@ -28,7 +28,23 @@ OCRのモデルは初回実行時に huggingface.co からダウンロードさ�
 
 ```
 kurokofude mask <図面.tif>
-kurokofude eval --truth <図面.truth.json> --result data/masked/<図面>.chiban.json
+kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図面>.chiban.json
+```
+
+## トラブルシューティング
+
+### ウイルス対策ソフトが OpenCV のライブラリを隔離する
+
+マカフィーが、uv のキャッシュと `.venv` 内の OpenCV ライブラリ（libaom、libtiff）を誤検出して隔離することがあります。`import cv2` が失敗するようになったら、隔離されていないか確認してください。
+
+1. マカフィーの設定で、次の2つのフォルダを除外に追加します
+   - `~/.cache/uv`（`uv cache dir` で場所を確認できます）
+   - このリポジトリの `.venv`
+2. 隔離されたファイルは壊れたままなので、`uv pip install --reinstall -e ".[dev]"` で入れ直します
+3. 次のコマンドがエラーなく終われば復旧しています
+
+```
+python -c "import cv2; import tifffile"
 ```
 
 ## 出典

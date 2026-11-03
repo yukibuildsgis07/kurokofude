@@ -1,6 +1,8 @@
 # 質問（Yuki・Fable へ）
 
-## Q1. 【止まっている】関所は `kurokofude mask` と生成コマンドを通すか（Yuki／Fable）
+## Q1. 【解決 11/3】関所は `kurokofude mask` と生成コマンドを通すか（Yuki／Fable）
+
+**回答（Fable）**：どちらの案でもなく、許可リスト方式。`kurokofude mask`、`kurokofude batch`、`python tools/make_dummy/make.py` だけ通し、正解データは `data/truth/` へ移して氏名の文字列を持たない。design.md §4.1・§6 に反映済み。以下は当時の記録。
 
 **矛盾**：design.md §4.1 は「コマンドに保護ディレクトリを含めば止める」。CLAUDE.md は Claude が `kurokofude mask data/raw/xxx.tif` や `python tools/make_dummy/make.py --out data/raw` を実行する前提。実際に実行するとフックで止まる（11/3 確認）。例外を作ると関所の抜け道になるので、自分では決めず、フックはそのまま厳しくしてある。
 
@@ -50,5 +52,6 @@ Yuki 用のコマンド（Aの場合）：
 
 - 親フォルダからの再帰：`grep -r x data`、`ls data`、`find data`
 - 文字列を組み立てるスクリプト：`python -c` でパスを連結する、パスをスクリプトの中に書く
+- 許可リストの中身の書き換え：`tools/make_dummy/make.py` や `src/kurokofude/`、`configs/default.yaml` は Claude が編集できるので、許可されたコマンドの中身を変えれば読めてしまう（11/3 追加）
 
 コマンド文字列の検査では後者を完全には塞げない。デモ用の関所としては十分でも、「安全です」とまでは言えない。→ README に「誤操作を防ぐもので、悪意のある回避は防がない」と明記するのがおすすめ。OS の権限で守るなら別途設計が必要。
