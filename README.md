@@ -40,6 +40,18 @@ kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図
 - OCR が文字として検出しなかった部分は塗られません。確認画面で人が足してください
 - 塗り漏れがゼロになるとは限りません。AI に渡す前に確認画面で確かめてください
 
+## Claude Code から使う（MCP）
+
+リポジトリのルートに `.mcp.json` があります。このフォルダで Claude Code を起動すると、MCP サーバー `kurokofude` の承認を求められるので承認してください（`uv` が必要です）。
+
+使えるツールは3つです。どれも、塗る前の図面の中身・パス、氏名の文字列を Claude に返しません。
+
+- `mask_drawing`：`data/raw/` の図面を塗り、塗った図面のパスと地番の一覧を返す
+- `open_review`：確認画面の URL を返す（確認画面は準備中）
+- `list_masked`：`data/masked/` の塗った図面の一覧
+
+「この図面を黒子筆で処理して」と頼むと、スキル `kurokofude` が `mask_drawing` を呼んで結果をまとめます。
+
 ## 関所について
 
 塗る前の図面を Claude に渡さないための守りは3層です。MCP の設計（生データを返さない）、フック（`.claude/hooks/guard_raw.py`）、Claude Code 本体の deny 設定（`.claude/settings.json`）です。

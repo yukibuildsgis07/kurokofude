@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "kurokofude": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--no-sync", "python", "-m", "kurokofude.mcp_server"]
+    }
+  }
+}

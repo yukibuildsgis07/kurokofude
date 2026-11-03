@@ -367,3 +367,18 @@ Yuki の現場の実感：地番はまず水平で置く。筆に入らなけれ
 ### 15.3 既知の制約
 「OCR の枠がない部分」の塗り漏れはエンジンでは追わず、②で人が足す。1桁の地番は検出されにくく、②での確認が要る（README に明記）。
 
+
+---
+
+## 16. MCP サーバーの実装（2026-11-04。§4.2 の補足）
+
+- Python MCP SDK 2.x では FastMCP が `MCPServer`（`mcp.server.mcpserver`）に改名された。中身は同じ（stdio）。`mcp>=2` に固定する
+- 起動は `.mcp.json` の `uv run --no-sync python -m kurokofude.mcp_server`。uv がプロジェクトの `.venv` の python を選ぶので、Mac（`.venv/bin`）と Windows（`.venv\Scripts`）でパスを書き分けなくてよい。`--no-sync` なので起動のたびに依存を入れ直さず、`uv.lock` も作らない
+- パスの基準はリポジトリのルート（`configs/` の親）。`data/masked/`、`data/cache/` もここから決める
+- `mask_drawing(path, config)`
+  - `path` を解決（`..`、シンボリックリンクを含めて実体のパス）し、`protected_dirs` の下にある `.tif`/`.tiff` のファイルでなければ拒否する。拒否と失敗のメッセージに入力のパスを含めない
+  - `config` は `configs/` の下のプリセット名（例 `bottom_strip`）だけを受け付ける。任意のパスは読まない
+  - 返すもの：塗った図面と `.chiban.json` のパス（ルートからの相対）、地番一覧（`text`、`center`、`score`、`status`：`detected` か `split`、`masked_below`）、数字主体で残した枠の数と位置（`uncertain`。文字は数字と `□` だけ）、塗りの数（`status` 別）、確認画面の URL（②ができるまで `null`）
+- `open_review(masked_path)`：`data/masked/` の下の塗った図面だけを受け付ける。②ができるまでは URL `null` と「未実装」を返す
+- `list_masked()`：`data/masked/` の TIFF ごとに、地番数、塗りの数（`status` 別）、確認済みか（塗りに `confirmed`／`removed`／`added` が1つでもあれば確認済み）
+- `print` やライブラリのログは SDK が標準出力から逃がす（SDK の stdio が fd 1 を確保する）
