@@ -136,6 +136,7 @@ def _summarize(result: dict) -> dict:
             for item in result.get("title_meta", [])
         ],
         "masks": _mask_counts(result),
+        "frame_quad": result.get("frame_quad"),  # 図郭線（画素座標4点）。なければ null
     }
 
 

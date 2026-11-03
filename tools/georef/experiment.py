@@ -106,10 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--max-iterations", type=int, help="0 で筆全体の重心だけ（§5 のまま）")
     parser.add_argument("--no-frame", action="store_true", help="図郭線を使わず、画像の範囲だけで切る")
+    parser.add_argument("--irls", choices=["huber", "none"], help="残差で重みを決める反復の方法")
     args = parser.parse_args(argv)
     config = load_config(args.config)
     if args.max_iterations is not None:
         config["max_iterations"] = args.max_iterations
+    if args.irls:
+        config["irls"] = {**config["irls"], "method": args.irls}
     for name in args.names:
         print(json.dumps(run(name, config, args.no_frame), ensure_ascii=False))
     return 0

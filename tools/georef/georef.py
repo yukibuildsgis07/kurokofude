@@ -29,6 +29,8 @@ PERCENT = 100.0
 CLIP_NONE = "none"
 CLIP_IMAGE = "image"
 CLIP_FRAME = "frame"
+IRLS_NONE = "none"
+MAD_TO_SIGMA = 1.4826  # 正規分布のとき、中央絶対偏差を標準偏差に直す係数
 
 
 @dataclass
@@ -48,6 +50,7 @@ class Fit:
     inliers: list[Pair]
     residuals_m: np.ndarray
     outliers: list[Pair] = field(default_factory=list)
+    weights: np.ndarray | None = None  # IRLS の最後の重み（inliers と同じ順）
 
 
 def load_config(path: Path | None = None) -> dict:
@@ -88,10 +91,41 @@ def design_rows(pixel: np.ndarray, flip_rows: bool) -> tuple[np.ndarray, np.ndar
     return np.column_stack([col, -row, ones, zeros]), np.column_stack([row, col, zeros, ones])
 
 
-def solve(pixel: np.ndarray, world: np.ndarray, flip_rows: bool = True) -> np.ndarray:
+def solve(pixel: np.ndarray, world: np.ndarray, flip_rows: bool = True, weights: np.ndarray | None = None) -> np.ndarray:
+    """（重み付き）最小二乗。weights はペアごとの重みで、東・北の両方の式に同じ重みを掛ける。"""
     east, north = design_rows(pixel, flip_rows)
-    params, *_ = np.linalg.lstsq(np.vstack([east, north]), np.concatenate([world[:, 0], world[:, 1]]), rcond=None)
+    matrix = np.vstack([east, north])
+    target = np.concatenate([world[:, 0], world[:, 1]])
+    if weights is not None:
+        root = np.sqrt(np.concatenate([weights, weights]))
+        matrix, target = matrix * root[:, None], target * root
+    params, *_ = np.linalg.lstsq(matrix, target, rcond=None)
     return params
+
+
+def robust_weights(residuals: np.ndarray, irls_cfg: dict) -> np.ndarray:
+    """残差が大きいペアほど重みを下げる（Huber）。尺度は中央絶対偏差（§5、Q14）。"""
+    scale = max(MAD_TO_SIGMA * float(np.median(np.abs(residuals))), irls_cfg["min_scale_m"])
+    ratio = np.abs(residuals) / scale
+    k = irls_cfg["k"]
+    return np.where(ratio <= k, 1.0, k / np.maximum(ratio, k))
+
+
+def irls(pixel: np.ndarray, world: np.ndarray, irls_cfg: dict, flip_rows: bool = True) -> tuple[np.ndarray, np.ndarray]:
+    """重み付き最小二乗を、重みが落ち着くまで繰り返す。返すのは変換と最後の重み。"""
+    weights = np.ones(len(pixel))
+    params = solve(pixel, world, flip_rows)
+    if irls_cfg["method"] == IRLS_NONE:
+        return params, weights
+    for _ in range(irls_cfg["iterations"]):
+        residuals = np.linalg.norm(apply(params, pixel, flip_rows) - world, axis=1)
+        new_weights = robust_weights(residuals, irls_cfg)
+        params = solve(pixel, world, flip_rows, new_weights)
+        if np.max(np.abs(new_weights - weights)) < irls_cfg["tolerance"]:
+            weights = new_weights
+            break
+        weights = new_weights
+    return params, weights
 
 
 def apply(params: np.ndarray, pixel: np.ndarray, flip_rows: bool = True) -> np.ndarray:
@@ -178,11 +212,12 @@ def fit_pairs(pairs: list[Pair], config: dict, flip_rows: bool = True) -> Fit | 
         if updated.sum() < config["min_pairs"] or (updated == best).all():
             break
         best = updated
-    params = solve(pixel[best], world[best], flip_rows)
+    # RANSAC 風の除外で残った組の内側で、残差で重みを決める最小二乗を繰り返す（Q14）
+    params, weights = irls(pixel[best], world[best], config["irls"], flip_rows)
     errors = np.linalg.norm(apply(params, pixel, flip_rows) - world, axis=1)
     inliers = [p for p, ok in zip(pairs, best) if ok]
     outliers = [p for p, ok in zip(pairs, best) if not ok]
-    return Fit(params, inliers, errors[best], outliers)
+    return Fit(params, inliers, errors[best], outliers, weights)
 
 
 def world_file(params: np.ndarray) -> list[float]:
@@ -253,9 +288,19 @@ def georeference(chiban_json: dict, geojson: dict, config: dict, frame_quad=None
             "residual_rms_m": round(float(np.sqrt(np.mean(fit.residuals_m**2))), REPORT_DECIMALS),
             "residual_max_m": round(float(fit.residuals_m.max()), REPORT_DECIMALS),
             "residuals": [
-                {"chiban": p.text, "read_as": p.read_as, "residual_m": round(float(r), REPORT_DECIMALS), "score": round(p.score, 3)}
-                for p, r in sorted(zip(fit.inliers, fit.residuals_m), key=lambda x: -x[1])
+                {
+                    "chiban": p.text,
+                    "read_as": p.read_as,
+                    "residual_m": round(float(r), REPORT_DECIMALS),
+                    "weight": round(float(w), REPORT_DECIMALS),
+                    "score": round(p.score, 3),
+                }
+                for p, r, w in sorted(
+                    zip(fit.inliers, fit.residuals_m, fit.weights if fit.weights is not None else np.ones(len(fit.inliers))),
+                    key=lambda x: -x[1],
+                )
             ],
+            "irls": config["irls"]["method"],
             "excluded": [p.text for p in fit.outliers],
             # 向きの確認：鏡映を許した変換のほうが合うなら、行の向きを取り違えている
             "mirrored_residual_rms_m": (
@@ -290,7 +335,9 @@ def main(argv: list[str] | None = None) -> int:
     config = load_config(args.config)
     chiban_json = json.loads(args.chiban_json.read_text(encoding="utf-8"))
     geojson = json.loads(args.geojson.read_text(encoding="utf-8"))
-    report = georeference(chiban_json, geojson, config, read_frame(args.frame))
+    # 図郭線は、指定があればそれを、なければ mask_drawing の結果（chiban.json の frame_quad）を使う
+    frame = read_frame(args.frame) if args.frame else chiban_json.get("frame_quad")
+    report = georeference(chiban_json, geojson, config, frame)
     stem = args.chiban_json.name.removesuffix(".chiban.json")
     if report["status"] == "ok" and not args.no_write:
         tfw = args.chiban_json.with_name(f"{stem}.tfw")

@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT / "tools" / "georef"))
 
 import georef  # noqa: E402
 
-CONFIG = {**georef.load_config(), "max_iterations": 0}
+CONFIG = {**georef.load_config(), "max_iterations": 0, "irls": {**georef.load_config()["irls"], "method": "none"}}
 PIXEL_M = 0.0635
 ROTATION_DEG = 1.5
 ORIGIN = (-61480.0, -143640.0)  # 左上の画素の公共座標（東, 北）
@@ -91,6 +91,28 @@ def test_hyphen_dropped_chiban_is_reread_with_lower_score():
     assert report["rereadings"] == [{"read_as": "1031", "matched": "103-1"}]
     reread = next(r for r in report["residuals"] if r["read_as"] == "1031")
     assert reread["score"] == pytest.approx(0.99 * CONFIG["reread_score_factor"])
+
+
+def test_irls_lowers_weight_of_pairs_with_large_residuals():
+    """引き出し線のように重心から離れた地番は、理由を知らなくても重みが下がり、変換が正しい側に寄る。"""
+    chiban_json, geojson = scene()
+    for item in chiban_json["chiban"][:3]:  # 3つの地番が重心から 6 m ほど東にずれて書かれている
+        item["center"][0] += 95
+    plain = georef.georeference(chiban_json, geojson, CONFIG)
+    huber = georef.georeference(chiban_json, geojson, {**CONFIG, "irls": {**CONFIG["irls"], "method": "huber"}})
+    shifted = {item["text"] for item in chiban_json["chiban"][:3]}
+    weights = {r["chiban"]: r["weight"] for r in huber["residuals"]}
+    assert max(weights[t] for t in shifted) < 0.5
+    assert min(w for t, w in weights.items() if t not in shifted) > 0.9
+    truth = np.array(truth_tfw())
+    assert np.abs(np.array(huber["world_file"]) - truth).max() < np.abs(np.array(plain["world_file"]) - truth).max()
+
+
+def test_robust_weights_are_one_for_small_residuals():
+    irls_cfg = georef.load_config()["irls"]
+    weights = georef.robust_weights(np.array([0.1, 0.2, 0.15, 5.0]), irls_cfg)
+    assert weights[:3].tolist() == [1.0, 1.0, 1.0]
+    assert weights[3] < 0.2
 
 
 def test_hyphen_candidates():

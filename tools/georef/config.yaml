@@ -6,3 +6,9 @@ max_pair_candidates: 4000    # RANSAC で試す2組の候補の上限
 seed: 20261104
 max_iterations: 5            # 見えている部分の重心で解き直す回数の上限（1回目は画像の範囲、2回目から図郭線）
 converge_scale_pct: 0.05     # 縮尺の変化がこれ未満（%）になったら止める
+irls:                        # 残差で重みを決める反復（Q14）。method: none で重みなし
+  method: huber
+  k: 1.345                   # Huber の閾値（残差の尺度の倍数）
+  min_scale_m: 0.5           # 残差の尺度の下限（m）。ほぼ一致するときに重みが暴れないように
+  iterations: 20
+  tolerance: 0.001           # 重みの変化がこれ未満なら止める

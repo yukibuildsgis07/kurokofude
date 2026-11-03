@@ -17,6 +17,9 @@ from .pair import pair_names
 from .refine import refine_lone_text, refine_pair, refine_unpaired, tight_box
 
 
+FRAME_CORNERS = 4
+
+
 @dataclass
 class MaskSummary:
     out_path: Path
@@ -29,6 +32,16 @@ def image_size_of(path: Path) -> tuple[int, int]:
     with tifffile.TiffFile(path) as tif:
         shape = tif.pages[0].shape
     return shape[1], shape[0]
+
+
+def frame_from_config(config: dict) -> list | None:
+    """設定の図郭線（frame_px）。4点の画素座標でなければ使わない。検出は今後（§5）。"""
+    frame = config.get("frame_px")
+    if frame is None:
+        return None
+    if len(frame) != FRAME_CORNERS or any(len(point) != 2 for point in frame):
+        raise ValueError("frame_px は画素座標の4点で指定してください")
+    return [[float(x), float(y)] for x, y in frame]
 
 
 def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> MaskSummary:
@@ -72,5 +85,6 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
         split,
         mixed_masked,
         classified.title_meta,
+        frame_from_config(config),
     )
     return MaskSummary(out_path, len(boxes), len(chiban_boxes), len(result["masks"]))

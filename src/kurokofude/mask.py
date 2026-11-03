@@ -127,6 +127,7 @@ def build_result(
     masked_ids: set[int],
     uncertain: list[dict],
     title_meta: list[dict] = (),
+    frame_quad: list | None = None,
 ) -> dict:
     """地番一覧 JSON（§2.4、§11.1）。氏名の文字列は持たない。"""
     return {
@@ -152,6 +153,7 @@ def build_result(
             for box in title_meta
         ],
         "masks": masks,
+        "frame_quad": frame_quad,  # 図郭線（画素座標4点）。安全なデータで、④の照合で使う（§5）
     }
 
 
@@ -168,6 +170,7 @@ def write_outputs(
     split: list[list] = (),
     mixed_masked: list[list] = (),
     title_meta: list[dict] = (),
+    frame_quad: list | None = None,
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
@@ -187,7 +190,9 @@ def write_outputs(
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
         shutil.copyfile(world_file, out_dir / world_file.name)
-    result = build_result(in_path.name, size, chiban_boxes, masks, masked_ids, list(uncertain), list(title_meta))
+    result = build_result(
+        in_path.name, size, chiban_boxes, masks, masked_ids, list(uncertain), list(title_meta), frame_quad
+    )
     (out_dir / f"{in_path.stem}.chiban.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8"
     )

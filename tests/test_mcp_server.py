@@ -59,10 +59,20 @@ def test_mask_drawing_returns_only_safe_data(project):
     assert [u["text"] for u in result["uncertain"]] == ["273:19"]
     assert result["masks"] == {"total": 2, "by_status": {"auto": 1, "unpaired": 1}}
     assert "review_url" not in result  # 確認画面の URL は返さない（§3.1）
+    assert result["frame_quad"] is None  # 設定 frame_px がなければ null（検出は今後）
     assert "open_review" in result["review"]
     dumped = json.dumps(result, ensure_ascii=False)
     assert "raw" not in dumped  # 塗る前の図面のパスを返さない
-    assert "quad" not in dumped  # 四角形の頂点や画像のバイト列も返さない
+    without_frame = json.dumps({k: v for k, v in result.items() if k != "frame_quad"}, ensure_ascii=False)
+    assert "quad" not in without_frame  # OCR の四角形の頂点や画像のバイト列は返さない（図郭線の4点だけは返す）
+
+
+def test_mask_drawing_returns_frame_from_config(project):
+    (project / "configs" / "framed.yaml").write_text("frame_px: [[10, 10], [990, 10], [990, 690], [10, 690]]\n", encoding="utf-8")
+    result = mcp_server.do_mask_drawing("data/raw/zumen.tif", "framed", root=project)
+    assert result["frame_quad"] == [[10.0, 10.0], [990.0, 10.0], [990.0, 690.0], [10.0, 690.0]]
+    saved = json.loads((project / "data" / "masked" / "zumen.chiban.json").read_text(encoding="utf-8"))
+    assert saved["frame_quad"] == result["frame_quad"]
 
 
 def test_mask_drawing_accepts_absolute_path_and_preset(project):
