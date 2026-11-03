@@ -41,6 +41,7 @@ hook_open_dirs:          # data の下で、Bash のコマンドに書いてよ�
   - data/truth
   - data/cache
   - data/ref
+  - data/source
 hook_allowed_commands:   # 保護ディレクトリを含んでも Bash で通すコマンドの先頭（§4.1）
   - kurokofude mask
   - kurokofude batch

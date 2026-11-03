@@ -20,7 +20,7 @@ EXCLUDE_MODES = {"chiban_only", EXCLUDE_MODE_ALL}
 # OCR の読み違いのうち、数字に戻してよいもの
 DIGIT_FIXES = {"O": "0", "o": "0", "l": "1", "I": "1"}
 # 地番の枝番の区切りに読み違えやすいもの（§11.4）
-HYPHEN_LIKE = "/\\|ｰ－‐ー−–—ノ"
+HYPHEN_LIKE = "/\\|ｰ－‐ー−–—ノ.,"
 CHAR_FIXES = str.maketrans({**DIGIT_FIXES, **{c: "-" for c in HYPHEN_LIKE}})
 # 先頭・末尾の記号ノイズ。英数字と、読めなかった文字の □ は記号として扱わない
 EDGE_NOISE = re.compile(r"^[^0-9A-Za-z□]+|[^0-9A-Za-z□]+$")
