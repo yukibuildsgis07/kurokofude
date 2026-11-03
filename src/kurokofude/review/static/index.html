@@ -11,6 +11,8 @@
   #side h1 { font-size: 16px; margin: 0 0 8px; }
   #side h2 { font-size: 13px; margin: 16px 0 6px; }
   #main { flex: 1; position: relative; overflow: hidden; background: #888; }
+  #scale { position: absolute; left: 12px; bottom: 12px; background: rgba(255,255,255,0.85); border-radius: 4px; padding: 6px 10px; font-size: 12px; pointer-events: none; }
+  #scale .bar { height: 6px; border: 2px solid #222; border-top: none; margin-top: 4px; }
   canvas { position: absolute; inset: 0; cursor: grab; }
   select, button { font: inherit; width: 100%; margin: 4px 0; padding: 6px; }
   button.primary { background: #1d4f91; color: #fff; border: none; border-radius: 4px; }
@@ -41,7 +43,7 @@
   <button id="confirm" class="primary">確定して塗り直す</button>
   <div id="status"></div>
 </div>
-<div id="main"><canvas id="view"></canvas></div>
+<div id="main"><canvas id="view"></canvas><div id="scale"><div id="zoom"></div><div class="bar" id="bar"></div><div id="barLabel"></div></div></div>
 <script>
 "use strict";
 const STYLES = {
@@ -109,6 +111,7 @@ function draw() {
   }
   if (drag && drag.adding && drag.preview) { path(drag.preview); ctx.fillStyle = STYLES.added.fill; ctx.fill(); }
   renderLegend();
+  renderScale();
 }
 function renderLegend() {
   const counts = {};
@@ -131,6 +134,38 @@ function renderLegend() {
   }
   const state = document.getElementById("state");
   state.innerHTML = data.confirmed ? `<span class="confirmed">確定済み（${data.confirmed_at}）</span>` : (dirty ? "未保存の変更があります" : "未確定");
+}
+// 画面上のピクセルで当たり判定を広げる。縮小表示でも細い塗りをクリックできるように
+const HIT_TOLERANCE_PX = 4;
+const BAR_MIN_PX = 60, BAR_MAX_PX = 160;
+function renderScale() {
+  document.getElementById("zoom").textContent = `倍率 ${Math.round(scale * 100)}%`;
+  const bar = document.getElementById("bar"), label = document.getElementById("barLabel");
+  const metersPerScreenPx = data.pixel_size_m ? data.pixel_size_m / scale : null;
+  if (!metersPerScreenPx) { bar.style.display = "none"; label.textContent = "スケール：.tfw なし"; return; }
+  let meters = null;
+  for (let e = -2; e <= 5 && meters === null; e++) {
+    for (const m of [1, 2, 5]) {
+      const length = m * Math.pow(10, e);
+      const px = length / metersPerScreenPx;
+      if (px >= BAR_MIN_PX && px <= BAR_MAX_PX) { meters = length; break; }
+    }
+  }
+  if (meters === null) { bar.style.display = "none"; label.textContent = ""; return; }
+  bar.style.display = "block";
+  bar.style.width = `${meters / metersPerScreenPx}px`;
+  label.textContent = meters >= 1 ? `${meters} m` : `${Math.round(meters * 100)} cm`;
+}
+function segmentDistance(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const length2 = dx * dx + dy * dy;
+  const t = length2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length2)) : 0;
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+function hits(quad, p) {
+  if (inside(quad, p)) return true;
+  const reach = HIT_TOLERANCE_PX / scale;  // 画面の 4px を画像の座標に直す
+  return quad.some((a, i) => segmentDistance(p, a, quad[(i + 1) % quad.length]) <= reach);
 }
 function inside(quad, p) {
   let hit = false;
@@ -161,7 +196,7 @@ function rectFrom(a, b, angle) {
 function click(p) {
   for (let i = data.masks.length - 1; i >= 0; i--) {
     const m = data.masks[i];
-    if (!inside(m.quad, p)) continue;
+    if (!hits(m.quad, p)) continue;
     if (m.uncertain_index !== undefined || (m.status === "added" && originOf(m) === "added")) {
       data.masks.splice(i, 1);
     } else {
@@ -172,7 +207,7 @@ function click(p) {
   const chosen = new Set(data.masks.map(m => m.uncertain_index));
   for (let i = 0; i < (data.uncertain || []).length; i++) {
     const u = data.uncertain[i];
-    if (!chosen.has(i) && inside(u.quad, p)) {
+    if (!chosen.has(i) && hits(u.quad, p)) {
       data.masks.push({ quad: u.quad, chiban: null, status: "added", origin: "uncertain_chiban", uncertain_index: i });
       changed(); return;
     }

@@ -65,6 +65,13 @@ def test_list_and_get(client):
     assert client.get("/").status_code == 200
 
 
+def test_drawing_reports_pixel_size_from_world_file(client, project):
+    assert client.get("/api/drawings/zumen").json()["pixel_size_m"] == pytest.approx(0.5)
+    (project / "data" / "masked" / "zumen.tfw").unlink()
+    assert client.get("/api/drawings/zumen").json()["pixel_size_m"] is None
+    assert "pixel_size_m" not in result_of(project)  # 保存はしない
+
+
 @pytest.mark.parametrize("name", ["nothing", "..", "zumen.chiban", "a b"])
 def test_unknown_or_odd_names_are_404(client, name):
     assert client.get(f"/api/drawings/{name}").status_code == 404

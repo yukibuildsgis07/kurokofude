@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shutil
 import socket
@@ -98,6 +99,18 @@ class ReviewStore:
 
     def save(self, name: str, result: dict) -> None:
         self._result_path(name).write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+
+    def with_scale(self, name: str, result: dict) -> dict:
+        """画面のスケールバー用に、.tfw から1画素の大きさ（m）を足す。保存はしない（§18.2）。"""
+        world_file = self.masked_tif(name).with_suffix(WORLD_FILE_SUFFIX)
+        pixel_size = None
+        if world_file.is_file():
+            try:
+                a, d = (float(v) for v in world_file.read_text(encoding="ascii").split()[:2])
+                pixel_size = math.hypot(a, d) or None
+            except ValueError:
+                pixel_size = None
+        return {**result, "pixel_size_m": pixel_size}
 
     def raw_drawing(self, name: str) -> Path:
         """chiban.json の source（ファイル名）を、保護ディレクトリの中から探す。"""
@@ -193,7 +206,7 @@ def create_app(root: Path, config: dict | None = None) -> FastAPI:
 
     @app.get("/api/drawings/{name}")
     def get_drawing(name: str) -> dict:
-        return store.load(name)
+        return store.with_scale(name, store.load(name))
 
     @app.get("/api/drawings/{name}/image")
     def get_image(name: str) -> FileResponse:
@@ -201,11 +214,11 @@ def create_app(root: Path, config: dict | None = None) -> FastAPI:
 
     @app.put("/api/drawings/{name}")
     def put_drawing(name: str, body: MasksIn) -> dict:
-        return store.update_masks(name, body.masks)
+        return store.with_scale(name, store.update_masks(name, body.masks))
 
     @app.post("/api/drawings/{name}/confirm")
     def confirm_drawing(name: str) -> dict:
-        return store.confirm(name)
+        return store.with_scale(name, store.confirm(name))
 
     return app
 
