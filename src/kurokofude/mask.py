@@ -23,6 +23,7 @@ STATUS_IN_TITLE_BLOCK = "in_title_block"
 STATUS_SPLIT = "split"
 STATUS_MIXED_MASKED = "mixed_masked"
 STATUS_UNCERTAIN_CHIBAN = "uncertain_chiban"
+STATUS_TITLE_META = "title_meta"
 # GeoTIFF のタグ：ModelPixelScale, ModelTiepoint, ModelTransformation, GeoKey×3, GDAL_METADATA, GDAL_NODATA
 GEO_TAG_CODES = (33550, 33922, 34264, 34735, 34736, 34737, 42112, 42113)
 
@@ -125,6 +126,7 @@ def build_result(
     masks: list[dict],
     masked_ids: set[int],
     uncertain: list[dict],
+    title_meta: list[dict] = (),
 ) -> dict:
     """地番一覧 JSON（§2.4、§11.1）。氏名の文字列は持たない。"""
     return {
@@ -145,6 +147,10 @@ def build_result(
             {"text": box["text"], "quad": box["quad"], "score": box["score"], "status": STATUS_UNCERTAIN_CHIBAN}
             for box in uncertain
         ],
+        "title_meta": [
+            {"text": box["text"], "quad": box["quad"], "score": box["score"], "status": STATUS_TITLE_META}
+            for box in title_meta
+        ],
         "masks": masks,
     }
 
@@ -161,13 +167,14 @@ def write_outputs(
     protected_quads: list[list] | None = None,
     split: list[list] = (),
     mixed_masked: list[list] = (),
+    title_meta: list[dict] = (),
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
     if out_tif.resolve() == in_path.resolve():
         raise ValueError("出力先が入力と同じです。元の図面は上書きしません")
     if protected_quads is None:
-        protected_quads = [box["quad"] for box in [*chiban_boxes, *uncertain]]
+        protected_quads = [box["quad"] for box in [*chiban_boxes, *uncertain, *title_meta]]
     protected = protected_area(protected_quads, mask_cfg["protect_margin_px"])
     others = [
         (list(unpaired), STATUS_UNPAIRED),
@@ -180,7 +187,7 @@ def write_outputs(
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
         shutil.copyfile(world_file, out_dir / world_file.name)
-    result = build_result(in_path.name, size, chiban_boxes, masks, masked_ids, list(uncertain))
+    result = build_result(in_path.name, size, chiban_boxes, masks, masked_ids, list(uncertain), list(title_meta))
     (out_dir / f"{in_path.stem}.chiban.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8"
     )

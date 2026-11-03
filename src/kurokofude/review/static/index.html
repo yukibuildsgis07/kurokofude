@@ -54,6 +54,7 @@ const STYLES = {
   split:          { label: "氏名と地番の枠を分けた氏名側", fill: "rgba(0,150,150,0.45)", line: "#006e6e" },
   added:          { label: "人が追加した塗り", fill: "rgba(30,90,220,0.45)", line: "#123f9e" },
   uncertain_chiban: { label: "数字の枠（塗っていない）", fill: null, line: "#1b8a2d" },
+  title_meta:     { label: "表題欄で残した文字（図郭番号・日付・図名）", fill: null, line: "#2f6f9f" },
   chiban:         { label: "地番（参考）", fill: null, line: "rgba(0,0,0,0.35)" },
 };
 const canvas = document.getElementById("view");
@@ -95,6 +96,7 @@ function draw() {
   ctx.drawImage(image, offsetX, offsetY, image.width * scale, image.height * scale);
   ctx.lineWidth = 1;
   for (const c of data.chiban) { path(c.quad); ctx.strokeStyle = STYLES.chiban.line; ctx.stroke(); }
+  for (const t of data.title_meta || []) { path(t.quad); ctx.lineWidth = 2; ctx.strokeStyle = STYLES.title_meta.line; ctx.stroke(); ctx.lineWidth = 1; }
   const chosen = new Set(data.masks.filter(m => m.uncertain_index !== undefined && m.status !== "removed").map(m => m.uncertain_index));
   (data.uncertain || []).forEach((u, i) => {
     if (chosen.has(i)) return;
@@ -129,6 +131,7 @@ function renderLegend() {
     const n = document.createElement("div");
     if (key === "uncertain_chiban") n.textContent = (data.uncertain || []).length;
     else if (key === "chiban") n.textContent = data.chiban.length;
+    else if (key === "title_meta") n.textContent = (data.title_meta || []).length;
     else n.textContent = counts[key] ? `${counts[key].on}` + (counts[key].off ? `（外した ${counts[key].off}）` : "") : "0";
     legend.append(sw, label, n);
   }

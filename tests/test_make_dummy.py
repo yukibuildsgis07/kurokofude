@@ -117,7 +117,7 @@ def test_fixture_truth_has_slanted_labels_and_no_place_names():
     lengths = [len(item["chiban"]["text"]) for item in truth["items"]]
     assert 1 in lengths and 2 in lengths
     assert all(set(item["name"]) == {"quad"} for item in truth["items"])  # 氏名の文字列を持たない
-    assert {"source", "image_size", "sheet", "scale_denominator", "items"} == set(truth)
+    assert {"source", "image_size", "sheet", "scale_denominator", "items", "title", "frame_quad"} == set(truth)
 
 
 NAMES = {"family": ["AA"], "given": ["BB"]}
@@ -216,9 +216,11 @@ def test_title_block_stays_inside_default_exclude_region(shape):
     assert dummy["title_block"]["width_ratio"] == pytest.approx(x1 - x0)
     assert dummy["title_block"]["height_ratio"] == pytest.approx(y1 - y0)
     sheet = moj_xml.parse_map(XML).sheets[0]
-    title = render.draw_title_block(
-        ink, lambda px: ImageFont.load_default(size=px), sheet, "R6.4.1", dummy["title_block"], 3
+    title, lines = render.draw_title_block(
+        ink, lambda px: ImageFont.load_default(size=px), sheet, "R6.4.1", dummy["title_block"], 3, "現況平面図", "AA BB"
     )
+    assert [kind for kind, _ in lines] == ["meta", "meta", "meta", "name", "meta"]
+    assert all(Polygon(quad).within(title) for _, quad in lines)
     min_x, min_y, max_x, max_y = title.bounds
     assert min_x / shape[1] >= x0 and min_y / shape[0] >= y0
     assert max_x / shape[1] <= x1 and max_y / shape[0] <= y1
@@ -271,6 +273,26 @@ def test_scan_skew_rotates_title_block_too():
         tops.append(int(height * 0.75) + rows[0])
     measured = np.degrees(np.arctan2(tops[0] - tops[1], columns[1] - columns[0]))
     assert measured == pytest.approx(angle, abs=0.5)
+
+
+def test_short_chiban_never_duplicates_existing_ones():
+    import make
+
+    parcels = [moj_xml.Parcel(chiban=str(100 + i), polygon=Polygon(square(0, 0, 1, 1))) for i in range(30)]
+    taken = {p.chiban for p in parcels} | {str(n) for n in range(1, 9)}  # 1桁は 9 だけ空いている
+    config = {"min_one_digit": 3, "min_two_digit": 3}
+    make.ensure_short_chiban(parcels, random.Random(3), config, taken)
+    texts = [p.chiban for p in parcels]
+    assert len(texts) == len(set(texts))
+    assert [t for t in texts if len(t) == 1] == ["9"]  # 空きがなければそれ以上は置き換えない
+    assert sum(1 for t in texts if len(t) == 2) == 3
+
+
+def test_fixture_truth_has_title_lines_and_frame():
+    truth = json.loads((ROOT / "tests" / "fixtures" / "sample_small.truth.json").read_text(encoding="utf-8"))
+    assert {t["kind"] for t in truth["title"]} == {"name", "meta"}
+    assert all(set(t) == {"kind", "quad"} for t in truth["title"])  # 作成者名の文字列は持たない
+    assert len(truth["frame_quad"]) == 4
 
 
 def test_config_uses_only_plane_coordinate_system_8():

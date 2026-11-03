@@ -128,6 +128,13 @@ def _summarize(result: dict) -> dict:
             }
             for item in result.get("uncertain", [])
         ],
+        "title_meta": [
+            {
+                "text": item["text"],  # 数字・記号・図名の定型語と □ だけ（§18.1）
+                "center": [round(sum(p[i] for p in item["quad"]) / len(item["quad"]), CENTER_DECIMALS) for i in (0, 1)],
+            }
+            for item in result.get("title_meta", [])
+        ],
         "masks": _mask_counts(result),
     }
 

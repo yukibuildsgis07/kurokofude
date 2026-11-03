@@ -72,8 +72,11 @@ def pick_sheet(data: MapData, rng: random.Random, source_cfg: dict, chiban_re: r
     return rng.choice(candidates) if candidates else None
 
 
-def ensure_short_chiban(parcels: list[Parcel], rng: random.Random, source_cfg: dict) -> None:
-    """1桁・2桁の地番が足りなければ、他の筆の地番を置き換える（§11.7）。"""
+def ensure_short_chiban(parcels: list[Parcel], rng: random.Random, source_cfg: dict, taken: set[str]) -> None:
+    """1桁・2桁の地番が足りなければ、他の筆の地番を置き換える（§11.7）。
+
+    taken（図郭にある地番）と重複させない（§18.3）。置き換えた地番も taken に足す。
+    """
     for digits, minimum, low, high in (
         (1, source_cfg["min_one_digit"], 1, 9),
         (2, source_cfg["min_two_digit"], 10, 99),
@@ -81,15 +84,27 @@ def ensure_short_chiban(parcels: list[Parcel], rng: random.Random, source_cfg: d
         shortage = minimum - sum(1 for p in parcels if len(p.chiban) == digits)
         longer = [p for p in parcels if len(p.chiban) > 2]
         for parcel in rng.sample(longer, min(max(shortage, 0), len(longer))):
-            parcel.chiban = str(rng.randint(low, high))
+            free = [str(n) for n in range(low, high + 1) if str(n) not in taken]
+            if not free:
+                break
+            taken.discard(parcel.chiban)
+            parcel.chiban = rng.choice(free)
+            taken.add(parcel.chiban)
 
 
 def quad_to_list(quad: np.ndarray) -> list[list[float]]:
     return [[round(float(x), QUAD_DECIMALS), round(float(y), QUAD_DECIMALS)] for x, y in quad]
 
 
-def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Label]) -> dict:
+def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Label], rendered=None) -> dict:
+    extra = {}
+    if rendered is not None:  # 表題欄の各行（作成者名の文字列は書かない）と図郭線（照合の検証用。§18.3、§18.4）
+        extra = {
+            "title": [{"kind": kind, "quad": quad_to_list(quad)} for kind, quad in rendered.title],
+            "frame_quad": quad_to_list(rendered.frame_quad),
+        }
     return {
+        **extra,
         "source": f"{name}.tif",
         "image_size": list(size),
         "sheet": sheet.number,
@@ -118,7 +133,7 @@ def write_outputs(
     (truth_dir / f"{name}.tfw").write_text(world_file_text, encoding="ascii")  # 照合の検証用の正解（§5）
     height, width = rendered.image.shape[:2]
     (truth_dir / f"{name}.truth.json").write_text(
-        json.dumps(truth_json(name, (width, height), sheet, rendered.labels), ensure_ascii=False, indent=1),
+        json.dumps(truth_json(name, (width, height), sheet, rendered.labels, rendered), ensure_ascii=False, indent=1),
         encoding="utf-8",
     )
     geojson = sheet_to_geojson(sheet, data, lambda c: chiban_re.fullmatch(c) is not None)
@@ -157,7 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         drawable = [p for p in parcels if chiban_re.fullmatch(p.chiban)]
         crop = tuple(args.crop) if args.crop else None
         world_to_px, size = view_transform(sheet, drawable, cfg, crop)
-        ensure_short_chiban(parcels_in_view(drawable, world_to_px, size), random.Random(args.seed + made), source_cfg)
+        ensure_short_chiban(
+            parcels_in_view(drawable, world_to_px, size),
+            random.Random(args.seed + made),
+            source_cfg,
+            {p.chiban for p in parcels},
+        )
         rendered = render_sheet(sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=crop)
         name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
         write_outputs(args.out, args.truth_out, args.ref_out, name, rendered, sheet, data, chiban_re)

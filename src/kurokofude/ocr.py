@@ -24,6 +24,7 @@ from .geometry import Frame, quad_frame
 HASH_CHUNK_BYTES = 1024 * 1024
 GRAY_NDIM = 2
 PLACEHOLDER = "□"
+RULE_TAG_LENGTH = 8
 ASCII_DIGITS = frozenset(string.digits)
 
 
@@ -43,17 +44,36 @@ def digit_ratio(text: str) -> float:
     return sum(1 for c in chars if c in ASCII_DIGITS) / len(chars)
 
 
-def scrub_text(text: str, keep_char_class: str, digit_ratio_min: float) -> str:
-    """氏名をキャッシュにもログにも残さない（§11.1）。
+def scrub_text(text: str, keep_char_class: str, keep_words: list[str] = ()) -> str:
+    """氏名をキャッシュにもログにも残さない（§11.1、§18.1）。
 
-    数字が主体の文字列は、数字の割合が分かる形（許可外の文字を □ に置換）で残す。
+    数字を含む文字列と、図名の定型語を含む文字列は、許可外の文字を □ にして残す。
+    定型語に一致した部分だけは文字のまま残す。それ以外は空文字にする。
     """
     allowed = [re.fullmatch(keep_char_class, c) is not None for c in text]
     if all(allowed):
         return text
-    if digit_ratio(text) < digit_ratio_min:
+    found_word = False
+    for word in keep_words:
+        start = text.find(word)
+        while word and start >= 0:
+            found_word = True
+            allowed[start : start + len(word)] = [True] * len(word)
+            start = text.find(word, start + len(word))
+    has_digit = any(c in ASCII_DIGITS for c in unicodedata.normalize("NFKC", text))
+    if not has_digit and not found_word:
         return ""
     return "".join(c if ok else PLACEHOLDER for c, ok in zip(text, allowed))
+
+
+def scrub_rule_tag(ocr_cfg: dict) -> str:
+    """保存の規則が変わったら、キャッシュを使い直さないための目印。"""
+    rule = json.dumps([ocr_cfg["keep_char_class"], list(ocr_cfg.get("title_keep_words", []))], ensure_ascii=False)
+    return hashlib.sha256(rule.encode("utf-8")).hexdigest()[:RULE_TAG_LENGTH]
+
+
+def cache_file(image_path: Path, ocr_cfg: dict, cache_dir: Path) -> Path:
+    return Path(cache_dir) / f"{file_sha256(image_path)}-{scrub_rule_tag(ocr_cfg)}.json"
 
 
 def tile_origins(length: int, max_side: int, overlap: int) -> list[int]:
@@ -101,7 +121,7 @@ def _recognize(engine, image_bgr: np.ndarray, origin: tuple[int, int], ocr_cfg: 
     for page in engine.predict(image_bgr):
         for text, score, poly in zip(page["rec_texts"], page["rec_scores"], page["rec_polys"]):
             quad = (np.asarray(poly, dtype=float) + origin).tolist()
-            scrubbed = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg["digit_ratio_min"])
+            scrubbed = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg.get("title_keep_words", []))
             boxes.append({"text": scrubbed, "score": float(score), "quad": quad})
     return boxes
 
@@ -151,7 +171,7 @@ def rerecognize_steep(boxes: list[dict], image_bgr: np.ndarray, ocr_cfg: dict) -
     results = recognize_crops(crops, ocr_cfg)
     for index, (box, _) in enumerate(targets):
         text, score = max(results[2 * index : 2 * index + 2], key=lambda result: result[1])
-        box["text"] = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg["digit_ratio_min"])
+        box["text"] = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg.get("title_keep_words", []))
         box["score"] = score * cfg["score_factor"]
     return boxes
 
@@ -179,7 +199,7 @@ def run_engine(image_bgr: np.ndarray, ocr_cfg: dict) -> list[dict]:
 
 def run_ocr(image_path: Path, ocr_cfg: dict, cache_dir: Path) -> list[dict]:
     """同じ画像では OCR を再実行しない。キャッシュの鍵は画像の SHA-256。"""
-    cache_path = Path(cache_dir) / f"{file_sha256(image_path)}.json"
+    cache_path = cache_file(image_path, ocr_cfg, cache_dir)
     if cache_path.is_file():
         return json.loads(cache_path.read_text(encoding="utf-8"))
     boxes = run_engine(read_image_for_ocr(image_path), ocr_cfg)

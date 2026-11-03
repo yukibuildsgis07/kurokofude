@@ -33,6 +33,7 @@ class Classified:
     text: list[dict]  # (c) それ以外。塗る
     title_text: list[dict]  # (c) のうち除外領域の中。塗るが、地番とペアにしない
     mixed: list[dict]  # □ と数字の両方を含む枠。氏名と地番が1つになっている（§13.2）
+    title_meta: list[dict]  # 表題欄の中で残す文字（数字を含む、または図名の定型語を含む。§18.1）
 
 
 def _plain(text: str) -> str:
@@ -73,12 +74,19 @@ def classify_boxes(boxes: list[dict], image_size: tuple[int, int], config: dict)
     mode = config["exclude_mode"]
     if mode not in EXCLUDE_MODES:
         raise ValueError(f"exclude_mode が不正です: {mode}")
-    result = Classified([], [], [], [], [])
+    result = Classified([], [], [], [], [], [])
     for box in boxes:
         in_region = in_exclude_region(np.mean(box["quad"], axis=0), image_size, config["exclude_regions"])
         if in_region and mode == EXCLUDE_MODE_ALL:
             continue
         text = normalize_text(box["text"])
+        if in_region:  # 表題欄の中は地番を判定しない。数字か定型語を含めば残し、それ以外は塗る（§18.1）
+            keep_words = config.get("title_keep_words", [])
+            if any(c in ASCII_DIGITS for c in text) or any(word in box["text"] for word in keep_words):
+                result.title_meta.append({**box, "text": text})
+            else:
+                result.title_text.append(box)
+            continue
         if not in_region and is_chiban_text(text, chiban_cfg) and not has_decoy_neighbor(box, boxes, chiban_cfg):
             # 読み直して地番になったものは信頼度を下げる（④の照合で使う）
             changed = text != _plain(box["text"])

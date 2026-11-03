@@ -32,7 +32,8 @@ def image_size_of(path: Path) -> tuple[int, int]:
 
 
 def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> MaskSummary:
-    boxes = run_ocr(in_path, config["ocr"], cache_dir)
+    ocr_cfg = {**config["ocr"], "title_keep_words": config.get("title_keep_words", [])}
+    boxes = run_ocr(in_path, ocr_cfg, cache_dir)
     classified = classify_boxes(boxes, image_size_of(in_path), config)
     frame_of = FrameResolver(boxes, config["angle"]).frame
     gray = cv2.cvtColor(read_image_for_ocr(in_path), cv2.COLOR_BGR2GRAY)
@@ -54,7 +55,7 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
     title = [refine_unpaired(box["quad"], gray, config["mask"], frame_of) for box in classified.title_text]
     protected_quads = [
         tight_box(box["quad"], frame_of(box["quad"]), gray, config["mask"])
-        for box in [*chiban_boxes, *classified.uncertain]
+        for box in [*chiban_boxes, *classified.uncertain, *classified.title_meta]
     ]
     split = [refine_unpaired(quad, gray, config["mask"], frame_of) for quad in mixed.split_masks]
     mixed_masked = [refine_unpaired(quad, gray, config["mask"], frame_of) for quad in mixed.masked]
@@ -70,5 +71,6 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
         protected_quads,
         split,
         mixed_masked,
+        classified.title_meta,
     )
     return MaskSummary(out_path, len(boxes), len(chiban_boxes), len(result["masks"]))

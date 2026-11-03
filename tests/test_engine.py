@@ -89,14 +89,34 @@ def test_classify_splits_into_three_kinds():
 
 
 def test_exclude_region_stops_only_chiban_by_default():
-    """表題欄の中の数字は地番にしない。文字は領域の中でも塗る（§12.1）。"""
+    """表題欄の中の数字は地番にしない。数字を含む文字は残し、それ以外は塗る（§12.1、§18.1）。"""
     number = box(rect(900, 650, 60, 20), "2024")
     author = box(rect(900, 620, 60, 20), "")
     result = classify_boxes([number, author], IMAGE_SIZE, CONFIG)
-    assert result.chiban == []
-    assert [b["text"] for b in result.uncertain] == ["2024"]
+    assert result.chiban == [] and result.uncertain == []
+    assert [b["text"] for b in result.title_meta] == ["2024"]
     assert result.title_text == [author]
     assert result.text == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["図郭番号J1□□□", "□□R6.4.1", "S=1:500", "□□□", "現況平面図", "□□平面図", "境界確定図□"],
+)
+def test_title_meta_keeps_digits_and_title_words(text):
+    """表題欄の中では、数字を1つでも含む文字と図名の定型語を含む文字を残す。"""
+    item = box(rect(900, 650, 60, 20), text)
+    result = classify_boxes([item], IMAGE_SIZE, CONFIG)
+    if text == "□□□":  # 数字も定型語もない（作成者名や会社名）
+        assert result.title_text == [item] and result.title_meta == []
+    else:
+        assert [b["text"] for b in result.title_meta] == [normalize_text(text)]
+
+
+def test_title_words_are_not_special_outside_the_title_block():
+    item = box(rect(100, 100, 60, 20), "現況平面図")
+    result = classify_boxes([item], IMAGE_SIZE, CONFIG)
+    assert result.text == [item] and result.title_meta == []
 
 
 def test_exclude_mode_all_ignores_the_region():
@@ -571,6 +591,25 @@ def test_evaluate_reports_scores_excluding_line_overlaps():
     assert scores["excluding_line_overlaps"]["truth_items"] == 1
 
 
+def test_evaluate_reports_title_block_scores():
+    name, chiban = rect(30, 40, 40, 10), rect(30, 20, 20, 10)
+    author, sheet_no = rect(90, 60, 40, 10), rect(90, 80, 40, 10)
+    truth = {
+        "items": [truth_item(chiban, name)],
+        "title": [{"kind": "name", "quad": author}, {"kind": "meta", "quad": sheet_no}],
+    }
+    result = {
+        "chiban": [],
+        "title_meta": [{"text": "J1", "quad": sheet_no, "score": 1.0, "status": "title_meta"}],
+        "masks": [{"quad": name, "chiban": None, "status": "auto"}, {"quad": author, "chiban": None, "status": "in_title_block"}],
+    }
+    scores = evaluate(truth, result, gray_with_ink(chiban, sheet_no), THRESHOLD, MARGIN)
+    assert scores["title_name_coverage_pct"] == 100.0
+    assert scores["title_meta_survival_pct"] == 100.0
+    assert scores["title_meta_kept"] == 1
+    assert scores["overmask_pct"] == 0.0  # 表題欄の作成者名を塗っても、塗りすぎではない
+
+
 def test_evaluate_reports_scores_by_placement():
     flat_chiban, flat_name = rect(30, 20, 20, 10), rect(30, 40, 40, 10)
     turned_chiban, turned_name = rect(90, 20, 20, 10), rect(90, 40, 40, 10)
@@ -601,15 +640,29 @@ def test_average_scores_handles_nested_values():
 # ocr（エンジンなし）
 
 
-def test_scrub_drops_names_but_keeps_numbers():
-    keep = CONFIG["ocr"]["keep_char_class"], CONFIG["ocr"]["digit_ratio_min"]
+def test_scrub_drops_names_but_keeps_numbers_and_title_words():
+    keep = CONFIG["ocr"]["keep_char_class"], CONFIG["title_keep_words"]
     assert ocr_module.scrub_text("架空 太郎", *keep) == ""
     assert ocr_module.scrub_text("273-4", *keep) == "273-4"
     assert ocr_module.scrub_text("S=1:500", *keep) == "S=1:500"
     assert ocr_module.scrub_text("273ノ9", *keep) == "273ノ9"
-    # 数字が主体なら数字の割合だけ分かる形で残し、許可外の文字は保存しない
+    # 数字を含めば、数字の位置が分かる形で残し、許可外の文字は保存しない（§18.1）
     assert ocr_module.scrub_text("273田", *keep) == "273□"
-    assert ocr_module.scrub_text("3田中", *keep) == ""
+    assert ocr_module.scrub_text("3田中", *keep) == "3□□"
+    assert ocr_module.scrub_text("作成 R6.4.1", *keep) == "□□ R6.4.1"
+    # 図名の定型語だけは文字のまま残す。ほかの文字（氏名など）は残さない
+    assert ocr_module.scrub_text("現況平面図", *keep) == "現況平面図"
+    assert ocr_module.scrub_text("架空町現況平面図", *keep) == "□□□現況平面図"
+    assert ocr_module.scrub_text("作成者 架空 太郎", *keep) == ""
+
+
+def test_cache_name_changes_when_scrub_rule_changes(tmp_path):
+    image = tmp_path / "a.tif"
+    tifffile.imwrite(image, np.zeros((4, 4, 3), dtype=np.uint8), photometric="rgb")
+    base = {**CONFIG["ocr"], "title_keep_words": ["平面図"]}
+    other = {**base, "title_keep_words": ["平面図", "台帳"]}
+    assert ocr_module.cache_file(image, base, tmp_path) != ocr_module.cache_file(image, other, tmp_path)
+    assert ocr_module.cache_file(image, base, tmp_path) == ocr_module.cache_file(image, dict(base), tmp_path)
 
 
 def test_tile_origins_cover_image_with_overlap():
@@ -712,7 +765,9 @@ def test_mask_file_labels_each_kind_of_paint(tmp_path, monkeypatch):
     summary = pipeline.mask_file(source, CONFIG, tmp_path / "out", tmp_path / "cache")
     result = json.loads((tmp_path / "out" / "a.chiban.json").read_text(encoding="utf-8"))
     assert sorted(m["status"] for m in result["masks"]) == ["auto", "in_title_block", "unpaired"]
-    assert [u["text"] for u in result["uncertain"]] == ["2024"]
+    assert [u["text"] for u in result["title_meta"]] == ["2024"]
+    assert result["title_meta"][0]["status"] == "title_meta"
+    assert result["uncertain"] == []
     assert summary.masks == 3
     assert summary.chiban == 1
 

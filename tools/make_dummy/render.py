@@ -25,6 +25,8 @@ HALF_TURN_DEG = 180
 QUARTER_TURN_DEG = 90
 SHORT_CHIBAN_MAX_LEN = 2
 HORIZONTAL_DEG = 0.0
+TITLE_NAME = "name"
+TITLE_META = "meta"
 PLACEMENT_HORIZONTAL = "horizontal"
 PLACEMENT_ROTATED = "rotated"
 PLACEMENT_LEADER = "leader"
@@ -47,6 +49,8 @@ class Rendered:
     image: np.ndarray  # RGB
     labels: list[Label]
     world_file: list[float]  # A, D, B, E, C, F
+    title: list[tuple[str, np.ndarray]]  # 表題欄の各行（種類 name／meta、四角形）
+    frame_quad: np.ndarray  # 図郭線（画像上の四角形。左上・右上・右下・左下）
 
 
 def pixels_per_meter(dpi: float, scale_denominator: int) -> float:
@@ -365,8 +369,13 @@ def scanify(ink: np.ndarray, rng: np.random.Generator, cfg: dict) -> np.ndarray:
     return np.clip(image, 0, FULL_INK).astype(np.uint8)
 
 
-def draw_title_block(ink: np.ndarray, font_of, sheet: Sheet, date: str, cfg: dict, frame_px: int) -> Polygon:
-    """右下に表題欄を描く。大きさは除外領域に揃え、文字は枠に入るように小さくする。"""
+def draw_title_block(
+    ink: np.ndarray, font_of, sheet: Sheet, date: str, cfg: dict, frame_px: int, drawing_title: str, author: str
+) -> tuple[Polygon, list[tuple[str, np.ndarray]]]:
+    """右下に表題欄を描く。大きさは除外領域に揃え、文字は枠に入るように小さくする（§18.4）。
+
+    返すのは表題欄の枠と、各行の種類（作成者名は name、それ以外は meta）と四角形。
+    """
     height, width = ink.shape
     padding = cfg["padding_px"]
     x0 = int(width * (1 - cfg["width_ratio"])) + padding
@@ -375,7 +384,14 @@ def draw_title_block(ink: np.ndarray, font_of, sheet: Sheet, date: str, cfg: dic
     cv2.rectangle(ink, (x0, y0), (x1, y1), 0, cv2.FILLED)  # 表題欄の下の筆界線は隠す
     cv2.rectangle(ink, (x0, y0), (x1, y1), FULL_INK, frame_px)
 
-    lines = [f"S = 1:{sheet.scale_denominator}", f"図郭番号 {sheet.number}", f"作成 {date}"]
+    entries = [
+        (TITLE_META, drawing_title),
+        (TITLE_META, f"図郭番号 {sheet.number}"),
+        (TITLE_META, f"作成 {date}"),
+        (TITLE_NAME, f"作成者 {author}"),
+        (TITLE_META, f"S = 1:{sheet.scale_denominator}"),
+    ]
+    lines = [line for _, line in entries]
     inner_width, inner_height = x1 - x0 - 2 * padding, y1 - y0 - 2 * padding
     size = cfg["font_px"]
     while size > 1:
@@ -388,10 +404,13 @@ def draw_title_block(ink: np.ndarray, font_of, sheet: Sheet, date: str, cfg: dic
         size -= 1
     line_height = size * cfg["line_ratio"]
     center_x, center_y = (x0 + x1) / 2, (y0 + y1) / 2
-    for index, line in enumerate(lines):
+    quads = []
+    for index, (kind, line) in enumerate(entries):
         offset = (index - (len(lines) - 1) / 2) * line_height
-        stamp_text(ink, font, line, np.array([center_x, center_y + offset]), 0.0)
-    return box(x0, y0, x1, y1)
+        center = np.array([center_x, center_y + offset])
+        stamp_text(ink, font, line, center, 0.0)
+        quads.append((kind, text_quad(center, *text_extent(font, line), 0.0)))
+    return box(x0, y0, x1, y1), quads
 
 
 def densest_crop_origin(
@@ -477,7 +496,16 @@ def render_sheet(
     name_font = ImageFont.truetype(str(font_path), int(round(mm_to_px(render_cfg["name_height_mm"], dpi))))
     title_font_of = lambda px: ImageFont.truetype(str(font_path), px)  # noqa: E731
 
-    keep_out = draw_title_block(ink, title_font_of, sheet, rng.choice(title_cfg["dates"]), title_cfg, render_cfg["frame_width_px"])
+    keep_out, title = draw_title_block(
+        ink,
+        title_font_of,
+        sheet,
+        rng.choice(title_cfg["dates"]),
+        title_cfg,
+        render_cfg["frame_width_px"],
+        rng.choice(title_cfg["drawing_titles"]),
+        fake_name(rng, cfg["names"]),
+    )
     shuffled = list(drawable)
     rng.shuffle(shuffled)
     shuffled.sort(key=lambda p: len(p.chiban) > SHORT_CHIBAN_MAX_LEN)  # 短い地番を先に置いて確実に残す
@@ -513,4 +541,6 @@ def render_sheet(
         image=scanify(ink, np_rng, scan_cfg),
         labels=labels,
         world_file=world_file_from(compose(skew, world_to_px)),
+        title=[(kind, apply_affine(skew, quad)) for kind, quad in title],
+        frame_quad=apply_affine(skew, frame),
     )

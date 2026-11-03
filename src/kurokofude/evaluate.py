@@ -13,6 +13,8 @@ STATUS_REMOVED = "removed"
 PERCENT = 100.0
 MIN_POLYGON_VERTICES = 3
 PAINTED = [255]
+TITLE_NAME = "name"
+TITLE_META = "meta"
 JOIN_STYLE_MITRE = 2  # 四角形を角を保ったまま膨らませる
 
 
@@ -62,7 +64,11 @@ def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int, ov
 
     items = truth["items"]
     detected = result["chiban"]
-    names_union = unary_union([_polygon(item["name"]["quad"]) for item in items])
+    title = truth.get("title", [])
+    title_names = [_polygon(t["quad"]) for t in title if t["kind"] == TITLE_NAME]
+    title_meta = [t for t in title if t["kind"] == TITLE_META]
+    # 表題欄の作成者名も、塗ってよい範囲に入れる（塗りすぎ率の分母の外にしない）
+    names_union = unary_union([_polygon(item["name"]["quad"]) for item in items] + title_names)
     chiban_polygons = [_polygon(item["chiban"]["quad"]) for item in items]
     clear_items = [item for item in items if not item.get("overlaps_line")]
     # 塗りすぎ率は許容余白の外だけを数える。線や他の文字を塗った量を測るため（§12.3）
@@ -85,6 +91,19 @@ def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int, ov
         "split_masks": sum(1 for m in result["masks"] if m.get("status") == STATUS_SPLIT),
         "mixed_masked": sum(1 for m in result["masks"] if m.get("status") == STATUS_MIXED_MASKED),
         "uncertain_chiban": len(result.get("uncertain", [])),
+        "title_meta_kept": len(result.get("title_meta", [])),
+        **(
+            {
+                "title_name_coverage_pct": round(
+                    _ratio(sum(p.intersection(masks_geometry).area for p in title_names), sum(p.area for p in title_names)), 2
+                ),
+                "title_meta_survival_pct": round(
+                    _ratio(sum(1 for t in title_meta if not _ink_is_painted(t["quad"], ink, painted)), len(title_meta)), 2
+                ),
+            }
+            if title
+            else {}
+        ),
         "excluding_line_overlaps": _item_scores(clear_items, masks_geometry, detected, ink, painted),
         "by_placement": {
             kind: _item_scores(
