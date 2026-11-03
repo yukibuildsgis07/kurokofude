@@ -374,24 +374,32 @@ def scanify(ink: np.ndarray, rng: np.random.Generator, cfg: dict) -> np.ndarray:
     return np.clip(image, 0, FULL_INK).astype(np.uint8)
 
 
-def draw_title_block(
-    ink: np.ndarray, font: ImageFont.FreeTypeFont, sheet: Sheet, date: str, cfg: dict, frame_px: int
-) -> Polygon:
-    """右下に表題欄を描く。傾ける前の座標で描くので、全体の傾きと一緒に回る。"""
+def draw_title_block(ink: np.ndarray, font_of, sheet: Sheet, date: str, cfg: dict, frame_px: int) -> Polygon:
+    """右下に表題欄を描く。大きさは除外領域に揃え、文字は枠に入るように小さくする。"""
     height, width = ink.shape
-    x1 = width - cfg["padding_px"]
-    y1 = height - cfg["padding_px"]
-    x0 = x1 - cfg["width_px"]
-    y0 = y1 - cfg["height_px"]
+    padding = cfg["padding_px"]
+    x0 = int(width * (1 - cfg["width_ratio"])) + padding
+    y0 = int(height * (1 - cfg["height_ratio"])) + padding
+    x1, y1 = width - padding, height - padding
     cv2.rectangle(ink, (x0, y0), (x1, y1), 0, cv2.FILLED)  # 表題欄の下の筆界線は隠す
     cv2.rectangle(ink, (x0, y0), (x1, y1), FULL_INK, frame_px)
+
     lines = [f"S = 1:{sheet.scale_denominator}", f"図郭番号 {sheet.number}", f"作成 {date}"]
+    inner_width, inner_height = x1 - x0 - 2 * padding, y1 - y0 - 2 * padding
+    size = cfg["font_px"]
+    while size > 1:
+        font = font_of(size)
+        if (
+            max(text_extent(font, line)[0] for line in lines) <= inner_width
+            and size * cfg["line_ratio"] * len(lines) <= inner_height
+        ):
+            break
+        size -= 1
+    line_height = size * cfg["line_ratio"]
+    center_x, center_y = (x0 + x1) / 2, (y0 + y1) / 2
     for index, line in enumerate(lines):
-        x = x0 + cfg["font_px"] // 2
-        y = y0 + cfg["font_px"] // 2 + index * cfg["line_px"]
-        text_w, text_h = text_extent(font, line)
-        center = np.array([x + text_w / 2, y + text_h / 2])
-        stamp_text(ink, font, line, center, 0.0)
+        offset = (index - (len(lines) - 1) / 2) * line_height
+        stamp_text(ink, font, line, np.array([center_x, center_y + offset]), 0.0)
     return box(x0, y0, x1, y1)
 
 
@@ -476,9 +484,9 @@ def render_sheet(
 
     chiban_font = ImageFont.truetype(str(font_path), int(round(mm_to_px(render_cfg["chiban_height_mm"], dpi))))
     name_font = ImageFont.truetype(str(font_path), int(round(mm_to_px(render_cfg["name_height_mm"], dpi))))
-    title_font = ImageFont.truetype(str(font_path), title_cfg["font_px"])
+    title_font_of = lambda px: ImageFont.truetype(str(font_path), px)  # noqa: E731
 
-    keep_out = draw_title_block(ink, title_font, sheet, rng.choice(title_cfg["dates"]), title_cfg, render_cfg["frame_width_px"])
+    keep_out = draw_title_block(ink, title_font_of, sheet, rng.choice(title_cfg["dates"]), title_cfg, render_cfg["frame_width_px"])
     shuffled = list(drawable)
     rng.shuffle(shuffled)
     shuffled.sort(key=lambda p: len(p.chiban) > SHORT_CHIBAN_MAX_LEN)  # 短い地番を先に置いて確実に残す

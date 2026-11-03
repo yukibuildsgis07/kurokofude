@@ -48,7 +48,8 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
         if config["mask"]["unpaired_text"]
         else []
     )
-    out_path, _ = write_outputs(
-        in_path, out_dir, classified.chiban, pairs, config["mask"], unpaired, classified.uncertain
+    title = [refine_unpaired(box["quad"], gray, config["mask"], frame_of) for box in classified.title_text]
+    out_path, result = write_outputs(
+        in_path, out_dir, classified.chiban, pairs, config["mask"], unpaired, classified.uncertain, title
     )
-    return MaskSummary(out_path, len(boxes), len(classified.chiban), len(pairs) + len(unpaired))
+    return MaskSummary(out_path, len(boxes), len(classified.chiban), len(result["masks"]))

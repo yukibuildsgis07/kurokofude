@@ -14,6 +14,9 @@ import numpy as np
 from .geometry import quad_frame
 from .ocr import digit_ratio
 
+EXCLUDE_MODE_ALL = "all"
+EXCLUDE_MODES = {"chiban_only", EXCLUDE_MODE_ALL}
+
 # OCR の読み違いのうち、数字に戻してよいもの
 DIGIT_FIXES = {"O": "0", "o": "0", "l": "1", "I": "1"}
 # 地番の枝番の区切りに読み違えやすいもの（§11.4）
@@ -28,6 +31,7 @@ class Classified:
     chiban: list[dict]  # (a) 地番。残す
     uncertain: list[dict]  # (b) 数字が主体だが地番の形でない。残して人が見る
     text: list[dict]  # (c) それ以外。塗る
+    title_text: list[dict]  # (c) のうち除外領域の中。塗るが、地番とペアにしない
 
 
 def _plain(text: str) -> str:
@@ -63,20 +67,26 @@ def has_decoy_neighbor(box: dict, boxes: list[dict], chiban_cfg: dict) -> bool:
 
 
 def classify_boxes(boxes: list[dict], image_size: tuple[int, int], config: dict) -> Classified:
-    """image_size は (幅, 高さ)。除外領域の中のボックスはどれにも入れない。"""
+    """image_size は (幅, 高さ)。除外領域は地番の誤検出を防ぐためのもの（§12.1）。"""
     chiban_cfg = config["chiban"]
-    result = Classified([], [], [])
+    mode = config["exclude_mode"]
+    if mode not in EXCLUDE_MODES:
+        raise ValueError(f"exclude_mode が不正です: {mode}")
+    result = Classified([], [], [], [])
     for box in boxes:
-        if in_exclude_region(np.mean(box["quad"], axis=0), image_size, config["exclude_regions"]):
+        in_region = in_exclude_region(np.mean(box["quad"], axis=0), image_size, config["exclude_regions"])
+        if in_region and mode == EXCLUDE_MODE_ALL:
             continue
         text = normalize_text(box["text"])
-        if is_chiban_text(text, chiban_cfg) and not has_decoy_neighbor(box, boxes, chiban_cfg):
+        if not in_region and is_chiban_text(text, chiban_cfg) and not has_decoy_neighbor(box, boxes, chiban_cfg):
             # 読み直して地番になったものは信頼度を下げる（④の照合で使う）
             changed = text != _plain(box["text"])
             score = box["score"] * chiban_cfg["normalized_score_factor"] if changed else box["score"]
             result.chiban.append({**box, "text": text, "score": score})
         elif digit_ratio(text) >= config["ocr"]["digit_ratio_min"]:
             result.uncertain.append({**box, "text": text})
+        elif in_region:
+            result.title_text.append(box)
         else:
             result.text.append(box)
     return result

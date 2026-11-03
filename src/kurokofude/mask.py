@@ -16,6 +16,7 @@ GRAY_NDIM = 2
 WORLD_FILE_SUFFIX = ".tfw"
 STATUS_AUTO = "auto"
 STATUS_UNPAIRED = "unpaired"
+STATUS_IN_TITLE_BLOCK = "in_title_block"
 STATUS_UNCERTAIN_CHIBAN = "uncertain_chiban"
 # GeoTIFF のタグ：ModelPixelScale, ModelTiepoint, ModelTransformation, GeoKey×3, GDAL_METADATA, GDAL_NODATA
 GEO_TAG_CODES = (33550, 33922, 34264, 34735, 34736, 34737, 42112, 42113)
@@ -70,6 +71,7 @@ def build_result(
     pairs: list[Pair],
     unpaired: list[list],
     uncertain: list[dict],
+    title: list[list] = (),
 ) -> dict:
     """地番一覧 JSON（§2.4、§11.1）。氏名の文字列は持たない。"""
     masked_ids = {id(pair.chiban) for pair in pairs}
@@ -91,7 +93,8 @@ def build_result(
             for box in uncertain
         ],
         "masks": [{"quad": pair.quad, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for pair in pairs]
-        + [{"quad": quad, "chiban": None, "status": STATUS_UNPAIRED} for quad in unpaired],
+        + [{"quad": quad, "chiban": None, "status": STATUS_UNPAIRED} for quad in unpaired]
+        + [{"quad": quad, "chiban": None, "status": STATUS_IN_TITLE_BLOCK} for quad in title],
     }
 
 
@@ -103,17 +106,18 @@ def write_outputs(
     mask_cfg: dict,
     unpaired: list[list] = (),
     uncertain: list[dict] = (),
+    title: list[list] = (),
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
     if out_tif.resolve() == in_path.resolve():
         raise ValueError("出力先が入力と同じです。元の図面は上書きしません")
-    polygons = [pair.quad for pair in pairs] + list(unpaired)
+    polygons = [pair.quad for pair in pairs] + list(unpaired) + list(title)
     size = write_masked_tiff(in_path, out_tif, polygons, mask_cfg["color"])
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
         shutil.copyfile(world_file, out_dir / world_file.name)
-    result = build_result(in_path.name, size, chiban_boxes, pairs, list(unpaired), list(uncertain))
+    result = build_result(in_path.name, size, chiban_boxes, pairs, list(unpaired), list(uncertain), list(title))
     (out_dir / f"{in_path.stem}.chiban.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8"
     )

@@ -74,15 +74,56 @@ def test_normalized_chiban_gets_lower_score():
 
 def test_classify_splits_into_three_kinds():
     chiban = box(rect(100, 100, 60, 20), "123-4")
-    misread = box(rect(100, 200, 60, 20), "273.19")
+    misread = box(rect(100, 200, 60, 20), "273:19")
     too_long = box(rect(100, 400, 90, 20), "123456")
     name = box(rect(100, 300, 60, 20), "")
-    title = box(rect(900, 650, 60, 20), "2024")  # 表題欄の領域
-    title_name = box(rect(900, 620, 60, 20), "")
-    result = classify_boxes([chiban, misread, too_long, name, title, title_name], IMAGE_SIZE, CONFIG)
+    result = classify_boxes([chiban, misread, too_long, name], IMAGE_SIZE, CONFIG)
     assert [b["text"] for b in result.chiban] == ["123-4"]
-    assert [b["text"] for b in result.uncertain] == ["273.19", "123456"]
+    assert [b["text"] for b in result.uncertain] == ["273:19", "123456"]
     assert result.text == [name]
+    assert result.title_text == []
+
+
+def test_exclude_region_stops_only_chiban_by_default():
+    """表題欄の中の数字は地番にしない。文字は領域の中でも塗る（§12.1）。"""
+    number = box(rect(900, 650, 60, 20), "2024")
+    author = box(rect(900, 620, 60, 20), "")
+    result = classify_boxes([number, author], IMAGE_SIZE, CONFIG)
+    assert result.chiban == []
+    assert [b["text"] for b in result.uncertain] == ["2024"]
+    assert result.title_text == [author]
+    assert result.text == []
+
+
+def test_exclude_mode_all_ignores_the_region():
+    config = {**CONFIG, "exclude_mode": "all"}
+    boxes = [box(rect(900, 650, 60, 20), "2024"), box(rect(900, 620, 60, 20), "")]
+    result = classify_boxes(boxes, IMAGE_SIZE, config)
+    assert (result.chiban, result.uncertain, result.text, result.title_text) == ([], [], [], [])
+
+
+def test_exclude_mode_rejects_unknown_value():
+    with pytest.raises(ValueError):
+        classify_boxes([], IMAGE_SIZE, {**CONFIG, "exclude_mode": "none"})
+
+
+def test_bottom_strip_preset_replaces_default_region():
+    preset = Path(__file__).parents[1] / "configs" / "bottom_strip.yaml"
+    config = load_config(preset)
+    assert config["exclude_regions"] == [[0.0, 0.90, 1.0, 1.0]]
+    assert config["exclude_mode"] == "chiban_only"
+    in_strip = box(rect(100, 680, 60, 20), "12")
+    assert classify_boxes([in_strip], IMAGE_SIZE, config).chiban == []
+
+
+def test_normalized_chiban_gets_lower_score():
+    clean = box(rect(100, 100, 60, 20), "273-9")
+    fixed = box(rect(300, 100, 60, 20), "273/9")
+    wide = box(rect(500, 100, 60, 20), "２７３－９")
+    result = classify_boxes([clean, fixed, wide], IMAGE_SIZE, CONFIG)
+    factor = CONFIG["chiban"]["normalized_score_factor"]
+    assert [b["score"] for b in result.chiban] == pytest.approx([0.9, 0.9 * factor, 0.9])
+    assert [b["text"] for b in result.chiban] == ["273-9"] * 3
 
 
 def test_number_next_to_scale_symbol_is_not_chiban_but_is_kept():
@@ -455,6 +496,30 @@ def test_cache_prevents_second_run(tmp_path, monkeypatch):
     second = ocr_module.run_ocr(image, CONFIG["ocr"], tmp_path / "cache")
     assert first == second
     assert len(calls) == 1
+
+
+# pipeline（OCR エンジンなし）
+
+
+def test_mask_file_labels_each_kind_of_paint(tmp_path, monkeypatch):
+    from kurokofude import pipeline
+
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((700, 1000, 3), 240, dtype=np.uint8), photometric="rgb")
+    boxes = [
+        box(rect(300, 300, 60, 20), "12-3"),
+        box(rect(300, 326, 90, 18)),  # 地番の下の氏名
+        box(rect(600, 200, 90, 18)),  # 地番と離れた文字
+        box(rect(900, 620, 90, 18)),  # 表題欄の文字
+        box(rect(900, 650, 60, 18), "2024"),  # 表題欄の数字
+    ]
+    monkeypatch.setattr(pipeline, "run_ocr", lambda *_args: boxes)
+    summary = pipeline.mask_file(source, CONFIG, tmp_path / "out", tmp_path / "cache")
+    result = json.loads((tmp_path / "out" / "a.chiban.json").read_text(encoding="utf-8"))
+    assert sorted(m["status"] for m in result["masks"]) == ["auto", "in_title_block", "unpaired"]
+    assert [u["text"] for u in result["uncertain"]] == ["2024"]
+    assert summary.masks == 3
+    assert summary.chiban == 1
 
 
 # batch

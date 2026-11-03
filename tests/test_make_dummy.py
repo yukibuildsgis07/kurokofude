@@ -185,6 +185,25 @@ def test_fixture_truth_records_placement():
     assert all(isinstance(item["leader"], bool) for item in truth["items"])
 
 
+@pytest.mark.parametrize("shape", [(2488, 3276), (700, 1000)])
+def test_title_block_stays_inside_default_exclude_region(shape):
+    ink = np.zeros(shape, dtype=np.uint8)
+    dummy = yaml.safe_load((ROOT / "tools" / "make_dummy" / "config.yaml").read_text(encoding="utf-8"))
+    default = yaml.safe_load((ROOT / "configs" / "default.yaml").read_text(encoding="utf-8"))
+    x0, y0, x1, y1 = default["exclude_regions"][0]
+    assert dummy["title_block"]["width_ratio"] == pytest.approx(x1 - x0)
+    assert dummy["title_block"]["height_ratio"] == pytest.approx(y1 - y0)
+    sheet = moj_xml.parse_map(XML).sheets[0]
+    title = render.draw_title_block(
+        ink, lambda px: ImageFont.load_default(size=px), sheet, "R6.4.1", dummy["title_block"], 3
+    )
+    min_x, min_y, max_x, max_y = title.bounds
+    assert min_x / shape[1] >= x0 and min_y / shape[0] >= y0
+    assert max_x / shape[1] <= x1 and max_y / shape[0] <= y1
+    rows, cols = np.nonzero(ink)
+    assert cols.min() >= min_x - 3 and rows.min() >= min_y - 3  # 文字も枠からはみ出さない
+
+
 def test_config_uses_only_plane_coordinate_system_8():
     config = yaml.safe_load((ROOT / "tools" / "make_dummy" / "config.yaml").read_text(encoding="utf-8"))
     assert config["source"]["coordinate_system"] == "公共座標8系"

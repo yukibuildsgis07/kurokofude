@@ -28,11 +28,11 @@ render:
   crop_stride_px: 100              # 切り出し位置の探索間隔
 
 title_block:
-  width_px: 360
-  height_px: 110
-  padding_px: 16                   # 画像の右下隅からの距離
-  font_px: 20
-  line_px: 28
+  width_ratio: 0.15                # configs/default.yaml の exclude_regions と揃える
+  height_ratio: 0.17
+  padding_px: 16                   # 除外領域の端からの距離
+  font_px: 28                      # 枠に入らなければ小さくする
+  line_ratio: 1.4                  # 行の間隔（文字の大きさの倍数）
   dates: ['R6.4.1', '2024/3/15', 'R5.11.20', '2023/9/1']
 
 scan:

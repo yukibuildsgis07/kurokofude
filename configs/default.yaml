@@ -5,7 +5,7 @@ ocr:
   tile_overlap: 200
   tile_merge_iou: 0.5   # タイル境界の二重検出を統合するしきい値
   # OCR直後に残してよい文字。他の文字は保存しない（§11.1）。地番の読み違いと縮尺・日付の記号だけ
-  keep_char_class: '[0-9０-９OoIl|ー−–—\-ｰ－‐ノ\\/SsRrHh=:：.\s]'
+  keep_char_class: '[0-9０-９OoIl|ー−–—\-ｰ－‐ノ\\/SsRrHh=:：.,\s]'
   digit_ratio_min: 0.5  # これ以上なら数字が主体
 chiban:
   pattern: '^\d{1,5}(-\d{1,4})?$'
@@ -15,7 +15,8 @@ chiban:
   decoy_neighbor_distance: 3.0  # 地番の高さの倍数
   normalized_score_factor: 0.8  # 正規化で地番になったものの score に掛ける
 exclude_regions:        # 画像に対する相対座標 [x0, y0, x1, y1]
-  - [0.6, 0.8, 1.0, 1.0]   # 右下の表題欄
+  - [0.85, 0.83, 1.0, 1.0]   # 右下の表題欄（図枠 800×600mm に 120×100mm）
+exclude_mode: chiban_only   # chiban_only：領域内は地番の判定だけ止める。all：領域内は何もしない
 pair:
   max_angle_deg: 10
   max_gap: 2.5          # 地番の高さの倍数
