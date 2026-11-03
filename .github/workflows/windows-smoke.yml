@@ -1,0 +1,44 @@
+# Windows での動作確認（設計書 §7）。OCR を実際に動かし、小さな図面で mask → eval を通す
+name: windows-smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHONUTF8: "1"
+  COVERAGE_MIN: "90"
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: 依存を入れる
+        run: uv sync --locked
+
+      # PaddleOCR のモデルは初回に約 130MB ダウンロードされる。2回目以降はキャッシュを使う
+      - name: OCR モデルのキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: ~/.paddlex/official_models
+          key: paddlex-models-${{ runner.os }}-${{ hashFiles('uv.lock', 'configs/default.yaml') }}
+
+      - name: 塗る（kurokofude mask）
+        run: uv run --no-sync kurokofude mask tests/fixtures/sample_small.tif
+
+      - name: 採点（氏名カバー率 ${{ env.COVERAGE_MIN }}% 未満で失敗）
+        run: >-
+          uv run --no-sync python tools/ci/check_coverage.py
+          --min ${{ env.COVERAGE_MIN }}
+          --truth tests/fixtures/sample_small.truth.json
+          --result data/masked/sample_small.chiban.json
+          --image tests/fixtures/sample_small.tif

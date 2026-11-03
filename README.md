@@ -1,17 +1,22 @@
 # 黒子筆（Kurokofude）
 
+[![test](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml)
+[![windows-smoke](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml)
+
 スキャンした測量図面（TIFF＋ワールドファイル）から、地番の真下にある地権者の氏名だけを手元のPCで塗りつぶし、安心してAIに渡せるようにする「AIに図面を渡す前の関所」です。
 
 ## インストール
 
 [uv](https://docs.astral.sh/uv/) を使います。Python 3.11 が必要です。
 
+Windows での動作確認は GitHub Actions で自動化しています（`windows-smoke`：インストール、OCR、塗り、採点まで）。
+
 ### Mac
 
 ```
 uv venv --python 3.11
 source .venv/bin/activate
-uv pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 ### Windows（PowerShell）
@@ -19,7 +24,7 @@ uv pip install -e ".[dev]"
 ```
 uv venv --python 3.11
 .venv\Scripts\Activate.ps1
-uv pip install -e ".[dev]"
+uv sync --extra dev
 ```
 
 OCRのモデルは初回実行時に huggingface.co からダウンロードされます。

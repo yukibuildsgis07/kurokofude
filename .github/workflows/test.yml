@@ -1,0 +1,29 @@
+# 単体テスト（OCR なし。設計書 §7）
+name: test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      # paddleocr が入れる opencv-contrib-python は libGL を必要とする
+      - name: OpenCV の実行に要るライブラリ
+        run: sudo apt-get update && sudo apt-get install -y libgl1
+
+      - name: 依存を入れる
+        run: uv sync --locked --extra dev
+
+      - name: 単体テスト
+        run: uv run --no-sync pytest -q
