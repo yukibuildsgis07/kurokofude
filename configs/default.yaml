@@ -4,8 +4,9 @@ ocr:
   max_side: 4000        # これを超えたらタイル分割
   tile_overlap: 200
   tile_merge_iou: 0.5   # タイル境界の二重検出を統合するしきい値
-  # これに一致しない文字列（氏名など）はOCR直後に捨てる。地番の読み違いと縮尺・日付の記号だけ通す
-  keep_text_pattern: '^[0-9０-９OoIl|ー−–\-SsRrHh=:：/.\s]*$'
+  # OCR直後に残してよい文字。他の文字は保存しない（§11.1）。地番の読み違いと縮尺・日付の記号だけ
+  keep_char_class: '[0-9０-９OoIl|ー−–—\-ｰ－‐ノ\\/SsRrHh=:：.\s]'
+  digit_ratio_min: 0.5  # これ以上なら数字が主体
 chiban:
   pattern: '^\d{1,5}(-\d{1,4})?$'
   min_digits: 1

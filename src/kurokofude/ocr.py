@@ -9,6 +9,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import string
+import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +20,8 @@ from shapely.geometry import Polygon
 
 HASH_CHUNK_BYTES = 1024 * 1024
 GRAY_NDIM = 2
+PLACEHOLDER = "□"
+ASCII_DIGITS = frozenset(string.digits)
 
 
 def file_sha256(path: Path) -> str:
@@ -27,9 +32,25 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def scrub_text(text: str, keep_pattern: str) -> str:
-    """地番になりうる文字列だけ残す。氏名はキャッシュにもログにも残さない。"""
-    return text if re.fullmatch(keep_pattern, text) else ""
+def digit_ratio(text: str) -> float:
+    """空白を除いた文字のうち、数字の割合。"""
+    chars = [c for c in unicodedata.normalize("NFKC", text) if not c.isspace()]
+    if not chars:
+        return 0.0
+    return sum(1 for c in chars if c in ASCII_DIGITS) / len(chars)
+
+
+def scrub_text(text: str, keep_char_class: str, digit_ratio_min: float) -> str:
+    """氏名をキャッシュにもログにも残さない（§11.1）。
+
+    数字が主体の文字列は、数字の割合が分かる形（許可外の文字を □ に置換）で残す。
+    """
+    allowed = [re.fullmatch(keep_char_class, c) is not None for c in text]
+    if all(allowed):
+        return text
+    if digit_ratio(text) < digit_ratio_min:
+        return ""
+    return "".join(c if ok else PLACEHOLDER for c, ok in zip(text, allowed))
 
 
 def tile_origins(length: int, max_side: int, overlap: int) -> list[int]:
@@ -58,24 +79,27 @@ def merge_duplicates(boxes: list[dict], iou_threshold: float) -> list[dict]:
     return [box for box, _ in kept]
 
 
-def _create_engine(ocr_cfg: dict):
-    from paddleocr import PaddleOCR  # 重いので必要なときだけ読む
+@lru_cache(maxsize=1)
+def _create_engine(lang: str, enable_mkldnn: bool):
+    """モデルの読み込みは重いので、batch では使い回す。"""
+    from paddleocr import PaddleOCR
 
     return PaddleOCR(
-        lang=ocr_cfg["lang"],
-        enable_mkldnn=ocr_cfg["enable_mkldnn"],
+        lang=lang,
+        enable_mkldnn=enable_mkldnn,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=False,
     )
 
 
-def _recognize(engine, image_bgr: np.ndarray, origin: tuple[int, int], keep_pattern: str) -> list[dict]:
+def _recognize(engine, image_bgr: np.ndarray, origin: tuple[int, int], ocr_cfg: dict) -> list[dict]:
     boxes = []
     for page in engine.predict(image_bgr):
         for text, score, poly in zip(page["rec_texts"], page["rec_scores"], page["rec_polys"]):
             quad = (np.asarray(poly, dtype=float) + origin).tolist()
-            boxes.append({"text": scrub_text(text, keep_pattern), "score": float(score), "quad": quad})
+            scrubbed = scrub_text(text, ocr_cfg["keep_char_class"], ocr_cfg["digit_ratio_min"])
+            boxes.append({"text": scrubbed, "score": float(score), "quad": quad})
     return boxes
 
 
@@ -87,15 +111,14 @@ def read_image_for_ocr(image_path: Path) -> np.ndarray:
 
 
 def run_engine(image_bgr: np.ndarray, ocr_cfg: dict) -> list[dict]:
-    engine = _create_engine(ocr_cfg)
-    keep_pattern = ocr_cfg["keep_text_pattern"]
+    engine = _create_engine(ocr_cfg["lang"], ocr_cfg["enable_mkldnn"])
     height, width = image_bgr.shape[:2]
     max_side, overlap = ocr_cfg["max_side"], ocr_cfg["tile_overlap"]
     boxes: list[dict] = []
     for y in tile_origins(height, max_side, overlap):
         for x in tile_origins(width, max_side, overlap):
             tile = image_bgr[y : y + max_side, x : x + max_side]
-            boxes.extend(_recognize(engine, tile, (x, y), keep_pattern))
+            boxes.extend(_recognize(engine, tile, (x, y), ocr_cfg))
     if max(height, width) > max_side:
         boxes = merge_duplicates(boxes, ocr_cfg["tile_merge_iou"])
     return boxes

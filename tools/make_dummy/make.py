@@ -23,8 +23,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from moj_xml import MapData, Sheet, parse_map, read_coordinate_system, read_xml_bytes, sheet_to_geojson  # noqa: E402
-from render import Label, find_font_path, render_sheet  # noqa: E402
+from moj_xml import MapData, Parcel, Sheet, parse_map, read_coordinate_system, read_xml_bytes, sheet_to_geojson  # noqa: E402
+from render import Label, find_font_path, parcels_in_view, render_sheet, view_transform  # noqa: E402
 
 DEFAULT_CONFIG = SCRIPT_DIR / "config.yaml"
 QUAD_DECIMALS = 2
@@ -55,6 +55,18 @@ def pick_sheet(data: MapData, rng: random.Random, source_cfg: dict, chiban_re: r
     return rng.choice(candidates) if candidates else None
 
 
+def ensure_short_chiban(parcels: list[Parcel], rng: random.Random, source_cfg: dict) -> None:
+    """1桁・2桁の地番が足りなければ、他の筆の地番を置き換える（§11.7）。"""
+    for digits, minimum, low, high in (
+        (1, source_cfg["min_one_digit"], 1, 9),
+        (2, source_cfg["min_two_digit"], 10, 99),
+    ):
+        shortage = minimum - sum(1 for p in parcels if len(p.chiban) == digits)
+        longer = [p for p in parcels if len(p.chiban) > 2]
+        for parcel in rng.sample(longer, min(max(shortage, 0), len(longer))):
+            parcel.chiban = str(rng.randint(low, high))
+
+
 def quad_to_list(quad: np.ndarray) -> list[list[float]]:
     return [[round(float(x), QUAD_DECIMALS), round(float(y), QUAD_DECIMALS)] for x, y in quad]
 
@@ -78,10 +90,10 @@ def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Labe
 
 
 def write_outputs(
-    out_dir: Path, truth_dir: Path, name: str, rendered, sheet: Sheet, data: MapData, chiban_re: re.Pattern
+    out_dir: Path, truth_dir: Path, ref_dir: Path, name: str, rendered, sheet: Sheet, data: MapData, chiban_re: re.Pattern
 ) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    truth_dir.mkdir(parents=True, exist_ok=True)
+    for directory in (out_dir, truth_dir, ref_dir):
+        directory.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(out_dir / f"{name}.tif", rendered.image, photometric="rgb")
     (out_dir / f"{name}.tfw").write_text(
         "\n".join(f"{value:.10f}" for value in rendered.world_file) + "\n", encoding="ascii"
@@ -92,7 +104,7 @@ def write_outputs(
         encoding="utf-8",
     )
     geojson = sheet_to_geojson(sheet, data, lambda c: chiban_re.fullmatch(c) is not None)
-    (out_dir / f"{name}.geojson").write_text(json.dumps(geojson, ensure_ascii=False), encoding="utf-8")
+    (ref_dir / f"{name}.geojson").write_text(json.dumps(geojson, ensure_ascii=False), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, default=Path("data") / "source")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--truth-out", type=Path, default=Path("data") / "truth")
+    parser.add_argument("--ref-out", type=Path, default=Path("data") / "ref")
     parser.add_argument("--count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=20261102)
     parser.add_argument("--name", default="dummy", help="ファイル名の接頭辞。--count 1 ならそのまま使う")
@@ -124,11 +137,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         parcels = [data.parcels[p] for p in sheet.parcel_ids if p in data.parcels]
         drawable = [p for p in parcels if chiban_re.fullmatch(p.chiban)]
-        rendered = render_sheet(
-            sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=tuple(args.crop) if args.crop else None
-        )
+        crop = tuple(args.crop) if args.crop else None
+        world_to_px, size = view_transform(sheet, drawable, cfg, crop)
+        ensure_short_chiban(parcels_in_view(drawable, world_to_px, size), random.Random(args.seed + made), source_cfg)
+        rendered = render_sheet(sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=crop)
         name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
-        write_outputs(args.out, args.truth_out, name, rendered, sheet, data, chiban_re)
+        write_outputs(args.out, args.truth_out, args.ref_out, name, rendered, sheet, data, chiban_re)
         height, width = rendered.image.shape[:2]
         print(f"{name}: {width}x{height}px, 図郭 {sheet.number}, 注記 {len(rendered.labels)} 件")
         made += 1

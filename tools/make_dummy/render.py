@@ -21,6 +21,7 @@ TEXT_PATCH_PADDING_PX = 3
 MAX_MIN_RECT_SIDES = 4
 HALF_TURN_DEG = 180
 QUARTER_TURN_DEG = 90
+SHORT_CHIBAN_MAX_LEN = 2
 
 
 @dataclass
@@ -293,6 +294,33 @@ def densest_crop_origin(
     return best
 
 
+def view_transform(
+    sheet: Sheet, drawable: list[Parcel], cfg: dict, crop: tuple[int, int] | None
+) -> tuple[np.ndarray, tuple[int, int]]:
+    """描く範囲の world → pixel の行列と画像サイズ。crop があれば筆の多い場所を切り出す。"""
+    render_cfg = cfg["render"]
+    dpi = render_cfg["dpi"]
+    px_per_m = pixels_per_meter(dpi, sheet.scale_denominator)
+    margin = mm_to_px(render_cfg["margin_mm"], dpi)
+    world_to_px, size = sheet_transform(sheet, px_per_m, margin)
+    if crop is None:
+        return world_to_px, size
+    x, y = densest_crop_origin(drawable, world_to_px, size, crop, render_cfg["crop_stride_px"])
+    world_to_px = world_to_px.copy()
+    world_to_px[:, 2] -= (x, y)
+    return world_to_px, crop
+
+
+def parcels_in_view(parcels: list[Parcel], world_to_px: np.ndarray, size: tuple[int, int]) -> list[Parcel]:
+    result = []
+    for parcel in parcels:
+        point = parcel.polygon.representative_point()
+        x, y = apply_affine(world_to_px, np.array([[point.x, point.y]]))[0]
+        if 0 <= x < size[0] and 0 <= y < size[1]:
+            result.append(parcel)
+    return result
+
+
 def render_sheet(
     sheet: Sheet,
     parcels: list[Parcel],
@@ -307,17 +335,10 @@ def render_sheet(
     rng = random.Random(seed)
     np_rng = np.random.default_rng(seed)
 
-    px_per_m = pixels_per_meter(dpi, sheet.scale_denominator)
-    margin = mm_to_px(render_cfg["margin_mm"], dpi)
-    world_to_px, size = sheet_transform(sheet, px_per_m, margin)
-    if crop is not None:
-        x, y = densest_crop_origin(drawable, world_to_px, size, crop, render_cfg["crop_stride_px"])
-        world_to_px = world_to_px.copy()
-        world_to_px[:, 2] -= (x, y)
-        size = crop
+    world_to_px, size = view_transform(sheet, drawable, cfg, crop)
     width, height = size
 
-    ink = np.zeros((height, width), dtype=np.uint8)
+    ink =np.zeros((height, width), dtype=np.uint8)
     for parcel in parcels:
         ring = apply_affine(world_to_px, np.array(parcel.polygon.exterior.coords))
         cv2.polylines(
@@ -333,6 +354,7 @@ def render_sheet(
     keep_out = draw_title_block(ink, title_font, sheet, rng.choice(title_cfg["dates"]), title_cfg, render_cfg["frame_width_px"])
     shuffled = list(drawable)
     rng.shuffle(shuffled)
+    shuffled.sort(key=lambda p: len(p.chiban) > SHORT_CHIBAN_MAX_LEN)  # 短い地番を先に置いて確実に残す
     labels = layout_labels(
         shuffled,
         world_to_px,

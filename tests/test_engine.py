@@ -214,10 +214,14 @@ def test_evaluate_ignores_removed_masks():
 
 
 def test_scrub_drops_names_but_keeps_numbers():
-    pattern = CONFIG["ocr"]["keep_text_pattern"]
-    assert ocr_module.scrub_text("架空 太郎", pattern) == ""
-    assert ocr_module.scrub_text("273-4", pattern) == "273-4"
-    assert ocr_module.scrub_text("S=1:500", pattern) == "S=1:500"
+    keep = CONFIG["ocr"]["keep_char_class"], CONFIG["ocr"]["digit_ratio_min"]
+    assert ocr_module.scrub_text("架空 太郎", *keep) == ""
+    assert ocr_module.scrub_text("273-4", *keep) == "273-4"
+    assert ocr_module.scrub_text("S=1:500", *keep) == "S=1:500"
+    assert ocr_module.scrub_text("273ノ9", *keep) == "273ノ9"
+    # 数字が主体なら数字の割合だけ分かる形で残し、許可外の文字は保存しない
+    assert ocr_module.scrub_text("273田", *keep) == "273□"
+    assert ocr_module.scrub_text("3田中", *keep) == ""
 
 
 def test_tile_origins_cover_image_with_overlap():
@@ -250,6 +254,29 @@ def test_cache_prevents_second_run(tmp_path, monkeypatch):
     second = ocr_module.run_ocr(image, CONFIG["ocr"], tmp_path / "cache")
     assert first == second
     assert len(calls) == 1
+
+
+# batch
+
+
+def test_batch_continues_after_failure_and_reports_it(tmp_path, monkeypatch, capsys):
+    from kurokofude import cli
+    from kurokofude.pipeline import MaskSummary
+
+    for name in ("a.tif", "b.tif", "c.tiff", "note.txt"):
+        (tmp_path / name).write_bytes(b"")
+    seen = []
+
+    def fake_mask_file(path, _config, out_dir, _cache):
+        seen.append(path.name)
+        if path.name == "b.tif":
+            raise ValueError("壊れた図面")
+        return MaskSummary(out_dir / path.name, 1, 1, 1)
+
+    monkeypatch.setattr(cli, "mask_file", fake_mask_file)
+    assert cli.main(["batch", str(tmp_path), "--out", str(tmp_path / "out")]) == 1
+    assert seen == ["a.tif", "b.tif", "c.tiff"]
+    assert "2/3" in capsys.readouterr().out
 
 
 # フィクスチャ（実際の OCR 結果）
