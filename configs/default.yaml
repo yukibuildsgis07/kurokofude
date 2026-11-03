@@ -31,6 +31,7 @@ mask:
   ink_threshold: 190    # これより暗い画素をインクとみなす（0〜255）
   valley_min_band_px: 2 # 帯がこれより狭ければインクの谷を探さず中点で切る
   tighten_padding_px: 3 # 余白を詰めるときに残す幅
+  protect_margin_px: 1  # 地番の枠をこれだけ膨らませて、塗りから引く
 protected_dirs:
   - data/raw
 hook_open_dirs:          # data の下で、Bash のコマンドに書いてよいフォルダ（§11.8）

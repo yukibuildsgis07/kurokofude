@@ -8,14 +8,15 @@ import cv2
 import numpy as np
 import pytest
 import tifffile
+from shapely.geometry import Polygon
 
 from kurokofude import ocr as ocr_module
 from kurokofude.config import load_config
 from kurokofude.detect import classify_boxes, normalize_text
 from kurokofude.evaluate import average_scores, evaluate
 from kurokofude.geometry import FrameResolver, angle_difference_deg, quad_frame
-from kurokofude.mask import fill_polygons, write_outputs
-from kurokofude.pair import pair_names
+from kurokofude.mask import fill_polygons, protected_area, subtract_protected, write_outputs
+from kurokofude.pair import Pair, pair_names
 from kurokofude.refine import cut_offset, refine_pair, tighten
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -330,6 +331,52 @@ def test_outputs_keep_pixels_world_file_and_geotiff_tags(tmp_path):
     assert result["chiban"][0]["masked_below"] is True
     saved = json.loads((tmp_path / "out" / "a.chiban.json").read_text(encoding="utf-8"))
     assert saved["masks"][0]["status"] == "auto"
+
+
+def test_paint_never_touches_protected_boxes_and_splits_into_pieces(tmp_path):
+    """地番の枠が塗りの中央にあっても、地番は塗られず、塗りは複数の項目に割れる（§12.2）。"""
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((100, 200, 3), 200, dtype=np.uint8), photometric="rgb")
+    chiban = box(rect(100, 50, 20, 60), "12")
+    lone = rect(100, 50, 100, 20)  # 地番の枠を横切る
+    out_tif, result = write_outputs(source, tmp_path / "out", [chiban], [], CONFIG["mask"], [lone])
+    painted = tifffile.imread(out_tif)
+    assert len(result["masks"]) == 2
+    assert {m["status"] for m in result["masks"]} == {"unpaired"}
+    assert painted[50, 100].tolist() == [200, 200, 200]  # 地番の枠の中
+    assert painted[50, 90].tolist() == [200, 200, 200]  # 地番の枠の端
+    assert painted[50, 70].tolist() == [0, 0, 0]
+    assert painted[50, 130].tolist() == [0, 0, 0]
+
+
+def test_uncertain_boxes_are_protected_too(tmp_path):
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((100, 200, 3), 200, dtype=np.uint8), photometric="rgb")
+    uncertain = box(rect(100, 50, 20, 60), "273:9")
+    _, result = write_outputs(source, tmp_path / "out", [], [], CONFIG["mask"], [rect(100, 50, 100, 20)], [uncertain])
+    assert len(result["masks"]) == 2
+
+
+def test_subtract_removes_hole_by_splitting_and_drops_covered_paint():
+    protected = protected_area([box(rect(100, 50, 20, 10), "12")], 1)
+    pieces = subtract_protected(rect(100, 50, 100, 60), protected)
+    assert len(pieces) == 2
+    area = sum(Polygon(piece).area for piece in pieces)
+    assert area == pytest.approx(100 * 60 - 22 * 12)
+    assert subtract_protected(rect(100, 50, 10, 4), protected) == []
+    untouched = rect(300, 50, 10, 4)
+    assert subtract_protected(untouched, protected) == [untouched]
+
+
+def test_masked_below_is_false_when_all_paint_is_removed(tmp_path):
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((100, 200, 3), 200, dtype=np.uint8), photometric="rgb")
+    chiban = box(rect(100, 40, 60, 60), "12")
+    name = box(rect(100, 60, 50, 10))
+    pairs = [Pair(chiban=chiban, quad=name["quad"], distance=1.0, source=name)]
+    _, result = write_outputs(source, tmp_path / "out", [chiban], pairs, CONFIG["mask"])
+    assert result["masks"] == []
+    assert result["chiban"][0]["masked_below"] is False
 
 
 def test_refuses_to_overwrite_the_input(tmp_path):

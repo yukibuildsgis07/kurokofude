@@ -9,11 +9,14 @@ from pathlib import Path
 import cv2
 import numpy as np
 import tifffile
+from shapely.geometry import Polygon, box
+from shapely.ops import unary_union
 
 from .pair import Pair
 
 GRAY_NDIM = 2
 WORLD_FILE_SUFFIX = ".tfw"
+JOIN_STYLE_MITRE = 2  # 四角形を角を保ったまま膨らませる
 STATUS_AUTO = "auto"
 STATUS_UNPAIRED = "unpaired"
 STATUS_IN_TITLE_BLOCK = "in_title_block"
@@ -64,17 +67,64 @@ def write_masked_tiff(in_path: Path, out_path: Path, polygons: list, color) -> t
     return image.shape[1], image.shape[0]
 
 
+def protected_area(boxes: list[dict], margin_px: float):
+    """塗ってはいけない範囲：地番と数字主体の枠を少し膨らませたもの（§12.2）。"""
+    return unary_union(
+        [Polygon(box["quad"]).buffer(0).buffer(margin_px, join_style=JOIN_STYLE_MITRE) for box in boxes]
+    )
+
+
+def _simple_pieces(geometry) -> list[list[list[float]]]:
+    """穴のない単純なポリゴンの頂点列に分解する。穴は、その位置で左右に割って消す。"""
+    if geometry.is_empty:
+        return []
+    if geometry.geom_type != "Polygon":
+        return [piece for part in getattr(geometry, "geoms", []) for piece in _simple_pieces(part)]
+    if geometry.area <= 0:
+        return []
+    if geometry.interiors:
+        min_x, min_y, max_x, max_y = geometry.bounds
+        split_x = Polygon(geometry.interiors[0]).centroid.x
+        return _simple_pieces(geometry.intersection(box(min_x, min_y, split_x, max_y))) + _simple_pieces(
+            geometry.intersection(box(split_x, min_y, max_x, max_y))
+        )
+    return [[list(point) for point in geometry.exterior.coords[:-1]]]
+
+
+def subtract_protected(polygon, protected) -> list[list[list[float]]]:
+    """塗る範囲から保護範囲を引く。重ならなければ元の頂点のまま返す。"""
+    shape = Polygon(polygon).buffer(0)
+    if not shape.intersects(protected):
+        return [polygon]
+    return _simple_pieces(shape.difference(protected))
+
+
+def build_masks(pairs: list[Pair], unpaired: list[list], title: list[list], protected) -> tuple[list[dict], set[int]]:
+    """塗りの項目と、塗りが残った地番の id を返す。ポリゴン1つが1項目。"""
+    masks: list[dict] = []
+    masked_ids: set[int] = set()
+    for pair in pairs:
+        pieces = subtract_protected(pair.quad, protected)
+        if pieces:
+            masked_ids.add(id(pair.chiban))
+        masks.extend({"quad": piece, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for piece in pieces)
+    for polygons, status in ((unpaired, STATUS_UNPAIRED), (title, STATUS_IN_TITLE_BLOCK)):
+        for polygon in polygons:
+            masks.extend(
+                {"quad": piece, "chiban": None, "status": status} for piece in subtract_protected(polygon, protected)
+            )
+    return masks, masked_ids
+
+
 def build_result(
     source_name: str,
     image_size: tuple[int, int],
     chiban_boxes: list[dict],
-    pairs: list[Pair],
-    unpaired: list[list],
+    masks: list[dict],
+    masked_ids: set[int],
     uncertain: list[dict],
-    title: list[list] = (),
 ) -> dict:
     """地番一覧 JSON（§2.4、§11.1）。氏名の文字列は持たない。"""
-    masked_ids = {id(pair.chiban) for pair in pairs}
     return {
         "source": source_name,
         "image_size": list(image_size),
@@ -92,9 +142,7 @@ def build_result(
             {"text": box["text"], "quad": box["quad"], "score": box["score"], "status": STATUS_UNCERTAIN_CHIBAN}
             for box in uncertain
         ],
-        "masks": [{"quad": pair.quad, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for pair in pairs]
-        + [{"quad": quad, "chiban": None, "status": STATUS_UNPAIRED} for quad in unpaired]
-        + [{"quad": quad, "chiban": None, "status": STATUS_IN_TITLE_BLOCK} for quad in title],
+        "masks": masks,
     }
 
 
@@ -112,12 +160,13 @@ def write_outputs(
     out_tif = out_dir / in_path.name
     if out_tif.resolve() == in_path.resolve():
         raise ValueError("出力先が入力と同じです。元の図面は上書きしません")
-    polygons = [pair.quad for pair in pairs] + list(unpaired) + list(title)
-    size = write_masked_tiff(in_path, out_tif, polygons, mask_cfg["color"])
+    protected = protected_area([*chiban_boxes, *uncertain], mask_cfg["protect_margin_px"])
+    masks, masked_ids = build_masks(pairs, list(unpaired), list(title), protected)
+    size = write_masked_tiff(in_path, out_tif, [mask["quad"] for mask in masks], mask_cfg["color"])
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
         shutil.copyfile(world_file, out_dir / world_file.name)
-    result = build_result(in_path.name, size, chiban_boxes, pairs, list(unpaired), list(uncertain), list(title))
+    result = build_result(in_path.name, size, chiban_boxes, masks, masked_ids, list(uncertain))
     (out_dir / f"{in_path.stem}.chiban.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8"
     )
