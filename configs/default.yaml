@@ -32,6 +32,8 @@ mask:
   valley_min_band_px: 2 # 帯がこれより狭ければインクの谷を探さず中点で切る
   tighten_padding_px: 3 # 余白を詰めるときに残す幅
   protect_margin_px: 1  # 地番の枠をこれだけ膨らませて、塗りから引く
+  protect_padding_px: 1 # 地番の枠をインクまで詰めるときに残す幅
+  core_valley_max_ratio: 0.5 # 枠の端まで続くインクを谷で切る条件（最大に対する割合）
 evaluate:
   overmask_margin_px: 3   # 塗りすぎ率で許容する、正解の氏名枠からの余白
 protected_dirs:

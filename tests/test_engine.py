@@ -17,7 +17,7 @@ from kurokofude.evaluate import average_scores, evaluate
 from kurokofude.geometry import FrameResolver, angle_difference_deg, quad_frame
 from kurokofude.mask import fill_polygons, protected_area, subtract_protected, write_outputs
 from kurokofude.pair import Pair, pair_names
-from kurokofude.refine import cut_offset, refine_pair, tighten
+from kurokofude.refine import cut_offset, refine_pair, tight_box, tighten
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = load_config()
@@ -286,6 +286,38 @@ def test_tighten_leaves_box_without_ink_unchanged():
     assert tighten(box_quad, quad_frame(box_quad), blank_gray(), CONFIG["mask"]) == box_quad
 
 
+def test_tight_box_excludes_name_ink_at_bottom_of_ocr_box():
+    """OCR の地番枠の下側に氏名の上端が入っていても、地番のインクまで詰まる（§13.1）。"""
+    gray = blank_gray()
+    draw_ink(gray, [[180, 140], [220, 140], [220, 156], [180, 156]])  # 地番
+    draw_ink(gray, [[165, 162], [235, 162], [235, 180], [165, 180]])  # 氏名（枠に上端が入る）
+    ocr_box = [[170, 130], [230, 130], [230, 168], [170, 168]]
+    result = np.array(tight_box(ocr_box, quad_frame(ocr_box), gray, CONFIG["mask"]))
+    assert result[:, 1].max() <= 158.5
+    assert result[:, 1].min() == pytest.approx(139, abs=1.5)
+    assert result[:, 0].min() == pytest.approx(179, abs=1.5)
+    assert result[:, 0].max() == pytest.approx(221, abs=1.5)
+
+
+def test_tight_box_cuts_at_valley_when_a_line_joins_chiban_and_name():
+    gray = blank_gray()
+    draw_ink(gray, [[180, 140], [220, 140], [220, 156], [180, 156]])
+    draw_ink(gray, [[165, 162], [235, 162], [235, 180], [165, 180]])
+    draw_ink(gray, [[198, 100], [200, 100], [200, 200], [198, 200]])  # 縦に貫く筆界線
+    ocr_box = [[170, 130], [230, 130], [230, 170], [170, 170]]
+    result = np.array(tight_box(ocr_box, quad_frame(ocr_box), gray, CONFIG["mask"]))
+    assert result[:, 1].max() <= 163
+
+
+def test_tight_box_never_grows_and_keeps_box_without_ink():
+    box_quad = rect(200, 150, 80, 40)
+    assert tight_box(box_quad, quad_frame(box_quad), blank_gray(), CONFIG["mask"]) == box_quad
+    gray = blank_gray()
+    draw_ink(gray, [[100, 100], [300, 100], [300, 200], [100, 200]])  # 枠より広いインク
+    result = np.array(tight_box(box_quad, quad_frame(box_quad), gray, CONFIG["mask"]))
+    assert result[:, 0].min() >= 160 and result[:, 0].max() <= 240
+
+
 def test_refine_pair_does_not_paint_chiban_ink():
     gray = blank_gray()
     draw_ink(gray, rect(200, 150, 50, 16))
@@ -360,7 +392,7 @@ def test_uncertain_boxes_are_protected_too(tmp_path):
 
 
 def test_subtract_removes_hole_by_splitting_and_drops_covered_paint():
-    protected = protected_area([box(rect(100, 50, 20, 10), "12")], 1)
+    protected = protected_area([rect(100, 50, 20, 10)], 1)
     pieces = subtract_protected(rect(100, 50, 100, 60), protected)
     assert len(pieces) == 2
     area = sum(Polygon(piece).area for piece in pieces)

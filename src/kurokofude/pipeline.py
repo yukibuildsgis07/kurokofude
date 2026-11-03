@@ -13,7 +13,7 @@ from .geometry import FrameResolver
 from .mask import write_outputs
 from .ocr import read_image_for_ocr, run_ocr
 from .pair import pair_names
-from .refine import refine_pair, refine_unpaired
+from .refine import refine_pair, refine_unpaired, tight_box
 
 
 @dataclass
@@ -49,7 +49,11 @@ def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> Ma
         else []
     )
     title = [refine_unpaired(box["quad"], gray, config["mask"], frame_of) for box in classified.title_text]
+    protected_quads = [
+        tight_box(box["quad"], frame_of(box["quad"]), gray, config["mask"])
+        for box in [*classified.chiban, *classified.uncertain]
+    ]
     out_path, result = write_outputs(
-        in_path, out_dir, classified.chiban, pairs, config["mask"], unpaired, classified.uncertain, title
+        in_path, out_dir, classified.chiban, pairs, config["mask"], unpaired, classified.uncertain, title, protected_quads
     )
     return MaskSummary(out_path, len(boxes), len(classified.chiban), len(result["masks"]))

@@ -67,10 +67,10 @@ def write_masked_tiff(in_path: Path, out_path: Path, polygons: list, color) -> t
     return image.shape[1], image.shape[0]
 
 
-def protected_area(boxes: list[dict], margin_px: float):
+def protected_area(quads: list[list], margin_px: float):
     """塗ってはいけない範囲：地番と数字主体の枠を少し膨らませたもの（§12.2）。"""
     return unary_union(
-        [Polygon(box["quad"]).buffer(0).buffer(margin_px, join_style=JOIN_STYLE_MITRE) for box in boxes]
+        [Polygon(quad).buffer(0).buffer(margin_px, join_style=JOIN_STYLE_MITRE) for quad in quads]
     )
 
 
@@ -155,12 +155,15 @@ def write_outputs(
     unpaired: list[list] = (),
     uncertain: list[dict] = (),
     title: list[list] = (),
+    protected_quads: list[list] | None = None,
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
     if out_tif.resolve() == in_path.resolve():
         raise ValueError("出力先が入力と同じです。元の図面は上書きしません")
-    protected = protected_area([*chiban_boxes, *uncertain], mask_cfg["protect_margin_px"])
+    if protected_quads is None:
+        protected_quads = [box["quad"] for box in [*chiban_boxes, *uncertain]]
+    protected = protected_area(protected_quads, mask_cfg["protect_margin_px"])
     masks, masked_ids = build_masks(pairs, list(unpaired), list(title), protected)
     size = write_masked_tiff(in_path, out_tif, [mask["quad"] for mask in masks], mask_cfg["color"])
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)

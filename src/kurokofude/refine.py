@@ -94,6 +94,56 @@ def tighten(polygon, frame: Frame, gray: np.ndarray, mask_cfg: dict) -> list[lis
     return [list(map(float, p)) for p in result]
 
 
+def _core_rows(rows: np.ndarray, max_ratio: float) -> tuple[int, int] | None:
+    """枠の中央を含むインクのかたまりの行の範囲。氏名の上端など、別のかたまりを外す。"""
+    inked = np.flatnonzero(rows)
+    if not inked.size:
+        return None
+    middle = len(rows) // 2
+    start = int(inked[np.argmin(np.abs(inked - middle))])
+    first = last = start
+    while last + 1 < len(rows) and rows[last + 1] > 0:
+        last += 1
+    while first > 0 and rows[first - 1] > 0:
+        first -= 1
+    limit = rows.max() * max_ratio
+    if last == len(rows) - 1 and last > start:  # 下の端まで続く。線がかかっていれば谷で切る
+        valley = start + int(np.argmin(rows[start:]))
+        if rows[valley] <= limit:
+            last = valley
+    if first == 0 and first < start:
+        valley = int(np.argmin(rows[: start + 1]))
+        if rows[valley] <= limit:
+            first = valley
+    return first, last
+
+
+def tight_box(quad, frame: Frame, gray: np.ndarray, mask_cfg: dict) -> list[list[float]]:
+    """地番の枠をインクまで詰める（§13.1）。詰めるだけで広げない。"""
+    u_range = project_interval(quad, frame.center, frame.u)
+    v_range = project_interval(quad, frame.center, frame.v)
+    ink = sample_ink(gray, frame.center, frame.u, frame.v, u_range, v_range, mask_cfg["ink_threshold"])
+    rows = _core_rows(ink.sum(axis=1), mask_cfg["core_valley_max_ratio"])
+    if rows is None:
+        return [list(map(float, p)) for p in quad]
+    columns = np.flatnonzero(ink[rows[0] : rows[1] + 1].sum(axis=0))
+    if not columns.size:
+        return [list(map(float, p)) for p in quad]
+    padding = mask_cfg["protect_padding_px"]
+    result = quad
+    for axis, extent, first, last in (
+        (frame.v, v_range, rows[0], rows[1]),
+        (frame.u, u_range, int(columns[0]), int(columns[-1])),
+    ):
+        low_cut = extent[0] + first - padding
+        high_cut = extent[0] + last + 1 + padding
+        if low_cut > extent[0]:
+            result = clip_below_line(result, frame.center + axis * low_cut, axis)
+        if high_cut < extent[1]:
+            result = clip_below_line(result, frame.center + axis * high_cut, -axis)
+    return [list(map(float, p)) for p in result]
+
+
 def refine_pair(pair: Pair, gray: np.ndarray, mask_cfg: dict, frame_of: Callable = quad_frame) -> None:
     """ペアの塗る範囲を、地番との境目で切ってから詰める。"""
     chiban = frame_of(pair.chiban["quad"])
