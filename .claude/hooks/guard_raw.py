@@ -3,7 +3,7 @@
 
 標準ライブラリだけで動かす（フックは venv の外の Python で走ることがある）。
 判定できないときは止める側に倒す。終了コード 1 は Claude Code では「止めない」扱いなので、
-例外もすべて終了コード 2 にする。
+例外もすべて終了コード 2 にする。止めたときは、どの規則で止めたかを1行添える（Q15）。
 """
 
 from __future__ import annotations
@@ -19,12 +19,18 @@ BLOCK_EXIT_CODE = 2
 ALLOW_EXIT_CODE = 0
 MESSAGE = "このファイルは黒子筆を通す前の図面です。`mask_drawing` ツールを使ってください"
 REVIEW_MESSAGE = "確認画面は人が見るための画面です。Claude は接続できません。`open_review` ツールでブラウザを開いてください"
+RULE_PATH = "保護フォルダへのパス"
+RULE_GLOB = "保護フォルダを指すグロブ"
+RULE_PARENT = "保護フォルダの親（data）を、開いてよいフォルダ以外で指すパス"
+RULE_REVIEW = "確認画面への接続"
+RULE_ERROR = "関所の判定に失敗"
 DEFAULT_PROTECTED_DIRS = ("data/raw",)
 CONFIG_RELATIVE_PATH = Path("configs") / "default.yaml"
 PATH_FIELDS = ("file_path", "path", "notebook_path")
 PATTERN_FIELDS = ("pattern", "glob")
 REVIEW_FIELDS = ("command", "url")
 GLOB_CHARS = "*?["
+PATH_SEPARATORS = ("/", "\\")
 ALLOWED_COMMANDS_KEY = "hook_allowed_commands"
 OPEN_DIRS_KEY = "hook_open_dirs"
 REVIEW_SECTION = "review"
@@ -98,27 +104,44 @@ def split_components(text: str) -> list[str]:
     return [c for c in text.replace("\\", "/").casefold().split("/") if c not in ("", ".")]
 
 
-def component_is_protected(component: str, names: set[str]) -> bool:
+def glob_allowed(word: str, names: set[str]) -> bool:
+    """グロブとして判定してよい語か（Q15）。パスの区切りを含む語か、保護フォルダ名を含む語だけ。
+
+    `[a-z]*` のような正規表現だけの語は、グロブとしては見ない。
+    """
+    folded = word.casefold()
+    return any(sep in word for sep in PATH_SEPARATORS) or any(name in folded for name in names)
+
+
+def component_rule(component: str, names: set[str], allow_glob: bool) -> str | None:
     if component in names:
-        return True
+        return RULE_PATH
     # `r*` や `ra?` のような狙い撃ちのグロブは止める。`*` `**` 単独は通常の検索なので通す
-    if any(ch in component for ch in GLOB_CHARS) and component.strip("*"):
-        return any(fnmatch.fnmatchcase(name, component) for name in names)
-    return False
+    if allow_glob and any(ch in component for ch in GLOB_CHARS) and component.strip("*"):
+        if any(fnmatch.fnmatchcase(name, component) for name in names):
+            return RULE_GLOB
+    return None
 
 
-def text_hits_protected(text: str, names: set[str]) -> bool:
-    return any(component_is_protected(c, names) for c in split_components(text))
+def text_rule(text: str, names: set[str], allow_glob: bool) -> str | None:
+    for component in split_components(text):
+        rule = component_rule(component, names, allow_glob)
+        if rule:
+            return rule
+    return None
 
 
-def path_hits_protected(raw_path: str, cwd: Path, names: set[str]) -> bool:
-    """`../` と絶対パス（normpath）、シンボリックリンク（realpath）の迂回を防ぐ。"""
-    if text_hits_protected(raw_path, names):
-        return True
+def path_rule(raw_path: str, cwd: Path, names: set[str]) -> str | None:
+    """`../` と絶対パス（normpath）、シンボリックリンク（realpath）の迂回を防ぐ。
+
+    グロブとして見るかどうかは、元の語で決める（つないだ後のパスには必ず区切りがあるため）。
+    """
+    allow_glob = glob_allowed(raw_path, names)
+    rule = text_rule(raw_path, names, allow_glob)
+    if rule:
+        return rule
     joined = cwd / os.path.expanduser(raw_path.replace("\\", "/"))
-    return text_hits_protected(os.path.normpath(joined), names) or text_hits_protected(
-        os.path.realpath(joined), names
-    )
+    return text_rule(os.path.normpath(joined), names, allow_glob) or text_rule(os.path.realpath(joined), names, allow_glob)
 
 
 def load_parent_rule(project_dir: Path) -> tuple[set[str], set[str]]:
@@ -129,10 +152,10 @@ def load_parent_rule(project_dir: Path) -> tuple[set[str], set[str]]:
     return parents, open_children
 
 
-def parent_rule_hits(components: list[str], parents: set[str], open_children: set[str]) -> bool:
+def parent_rule_hits(components: list[str], parents: set[str], open_children: set[str], allow_glob: bool) -> bool:
     """親の名前は、開いてよい子が続く形でなければ止める（`grep -r x data` などの穴を塞ぐ）。"""
     for index, component in enumerate(components):
-        if component_is_protected(component, parents):
+        if component_rule(component, parents, allow_glob):
             following = components[index + 1] if index + 1 < len(components) else None
             if following not in open_children:
                 return True
@@ -149,7 +172,7 @@ def path_inside_project(token: str, cwd: Path, project_dir: Path) -> str | None:
     return None if relative.startswith("..") else relative
 
 
-def command_hits_protected(command: str, cwd: Path, project_dir: Path, names: set[str]) -> bool:
+def command_rule(command: str, cwd: Path, project_dir: Path, names: set[str]) -> str | None:
     """シェルを解釈せず、語に分けて判定する。`ra""w` のような引用符の分断も潰す。"""
     parents, open_children = load_parent_rule(project_dir)
     unquoted = command.replace('"', "").replace("'", "")
@@ -157,17 +180,20 @@ def command_hits_protected(command: str, cwd: Path, project_dir: Path, names: se
         for token in TOKEN_SPLIT.split(text):
             if not token:
                 continue
-            if path_hits_protected(token, cwd, names):
-                return True
-            if parent_rule_hits(split_components(token), parents, open_children):
-                return True
+            rule = path_rule(token, cwd, names)
+            if rule:
+                return rule
+            allow_glob = glob_allowed(token, names | parents)
+            if parent_rule_hits(split_components(token), parents, open_children, allow_glob):
+                return RULE_PARENT
             relative = path_inside_project(token, cwd, project_dir)
-            if relative and parent_rule_hits(split_components(relative), parents, open_children):
-                return True
-    return False
+            if relative and parent_rule_hits(split_components(relative), parents, open_children, allow_glob):
+                return RULE_PARENT
+    return None
 
 
-def should_block(payload: dict) -> bool:
+def protected_rule(payload: dict) -> str | None:
+    """塗る前の図面に関わる規則で止めるなら、その規則の名前を返す。"""
     tool_input = payload.get("tool_input") or {}
     cwd = Path(payload.get("cwd") or os.getcwd())
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd)
@@ -175,20 +201,31 @@ def should_block(payload: dict) -> bool:
 
     for field in PATH_FIELDS:
         value = tool_input.get(field)
-        if isinstance(value, str) and value and path_hits_protected(value, cwd, names):
-            return True
+        if isinstance(value, str) and value:
+            rule = path_rule(value, cwd, names)
+            if rule:
+                return rule
     for field in PATTERN_FIELDS:
         value = tool_input.get(field)
-        if isinstance(value, str) and value and text_hits_protected(value, names):
-            return True
+        if isinstance(value, str) and value:
+            rule = text_rule(value, names, glob_allowed(value, names))
+            if rule:
+                return rule
     command = tool_input.get("command")
-    if not isinstance(command, str) or not command_hits_protected(command, cwd, project_dir, names):
-        return False
-    return not command_is_allowed(command, read_config_list(project_dir, ALLOWED_COMMANDS_KEY))
+    if not isinstance(command, str):
+        return None
+    rule = command_rule(command, cwd, project_dir, names)
+    if rule is None or command_is_allowed(command, read_config_list(project_dir, ALLOWED_COMMANDS_KEY)):
+        return None
+    return rule
+
+
+def should_block(payload: dict) -> bool:
+    return protected_rule(payload) is not None
 
 
 def block_reason(payload: dict) -> str | None:
-    """止める理由を返す。止めないときは None。"""
+    """止める理由（メッセージと、止めた規則の1行）を返す。止めないときは None。"""
     tool_input = payload.get("tool_input") or {}
     cwd = Path(payload.get("cwd") or os.getcwd())
     project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd)
@@ -196,15 +233,16 @@ def block_reason(payload: dict) -> str | None:
     for field in REVIEW_FIELDS:
         value = tool_input.get(field)
         if isinstance(value, str) and hits_review_server(value, port):
-            return REVIEW_MESSAGE
-    return MESSAGE if should_block(payload) else None
+            return f"{REVIEW_MESSAGE}\n止めた規則：{RULE_REVIEW}"
+    rule = protected_rule(payload)
+    return f"{MESSAGE}\n止めた規則：{rule}" if rule else None
 
 
 def main() -> int:
     try:
         reason = block_reason(json.load(sys.stdin))
     except Exception as exc:  # 判定不能は止める
-        print(f"{MESSAGE}（関所の判定に失敗: {type(exc).__name__}）", file=sys.stderr)
+        print(f"{MESSAGE}\n止めた規則：{RULE_ERROR}（{type(exc).__name__}）", file=sys.stderr)
         return BLOCK_EXIT_CODE
     if reason:
         print(reason, file=sys.stderr)

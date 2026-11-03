@@ -10,6 +10,7 @@ tools: Bash, Read
 
 - `data/raw/` の図面は開かない。読んでよいのは `data/masked/` と `data/ref/` だけ（フックで止まる）
 - 計算は自分でせず、必ず `tools/georef/georef.py` を実行する。結果の数字を書き換えない
+- ファイルの中を探すときは Grep ツールを使い、Bash の grep は使わない。ファイルを読むときは Read ツールを使う（Bash のコマンドは関所の判定が厳しく、止められやすい）
 
 ## 手順
 

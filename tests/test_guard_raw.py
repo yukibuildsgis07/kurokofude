@@ -207,6 +207,40 @@ def test_settings_cover_webfetch_and_preview_cache():
     assert "Read(./data/cache/raw/**)" in settings["permissions"]["deny"]
 
 
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"command": "grep -o '\"confirmed\": *[a-z]*' data/masked/dummy_001.chiban.json"},
+        {"command": "grep -E '[a-z]+' docs/design.md"},
+        {"pattern": "[a-z]*"},
+        {"command": "ls r*"},
+    ],
+)
+def test_regex_without_path_separator_is_not_treated_as_glob(tool_input):
+    """`[a-z]*` のような正規表現だけでは止めない（Q15）。"""
+    assert run_hook(tool_input).returncode == ALLOW
+
+
+@pytest.mark.parametrize(
+    "tool_input,rule",
+    [
+        ({"command": "ls data/raw/*.tif"}, "保護フォルダへのパス"),
+        ({"pattern": "data/raw/*.tif"}, "保護フォルダへのパス"),
+        ({"file_path": "data/raw/a.tif"}, "保護フォルダへのパス"),
+        ({"command": "cat data/r*/a.tif"}, "保護フォルダを指すグロブ"),
+        ({"command": "ls data/[r]aw"}, "保護フォルダを指すグロブ"),
+        ({"command": "ls raw*"}, "保護フォルダを指すグロブ"),
+        ({"command": "grep -r x data"}, "保護フォルダの親"),
+        ({"command": "curl http://127.0.0.1:8765/"}, "確認画面への接続"),
+    ],
+)
+def test_block_message_names_the_rule(tool_input, rule):
+    """止めたときは、どの規則で止めたかを1行添える（Q15）。"""
+    result = run_hook(tool_input)
+    assert result.returncode == BLOCK
+    assert f"止めた規則：{rule}" in result.stderr
+
+
 def test_allow_list_does_not_apply_to_read():
     assert run_hook({"file_path": "data/raw/kurokofude mask"}).returncode == BLOCK
 

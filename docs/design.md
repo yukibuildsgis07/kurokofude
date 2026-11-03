@@ -177,6 +177,7 @@ kurokofude eval  --truth <truth.json> --result <chiban.json>
 - ツール入力（file_path / pattern / command / path）に `raw/`（または設定した保護ディレクトリ）が含まれたら **終了コード2** で止め、stderrに「このファイルは黒子筆を通す前の図面です。`mask_drawing` ツールを使ってください」と返す
 - 判定は正規化したパスで行う（`../` や絶対パスでの迂回を防ぐ）
 - フックはプロジェクトの `.claude/settings.json` に置き、リポジトリに含める（利用者がcloneすれば効く）
+- 2026-11-04 追記（Fable 判断。Q15）：グロブとして判定するのは、パスの区切り（`/` か `\`）を含む語か、保護フォルダ名を含む語だけにする。`[a-z]*` のような正規表現だけの語では止めない。止めたときは、メッセージに「止めた規則：保護フォルダへのパス／保護フォルダを指すグロブ／保護フォルダの親を指すパス／確認画面への接続」の1行を添える
 - 2026-11-03 追記（Fable 判断）：Bash には許可リストを設ける。`configs/default.yaml` の `hook_allowed_commands`（`kurokofude mask`、`kurokofude batch`、`python tools/make_dummy/make.py`）で始まるコマンドは、保護ディレクトリを含んでも通す。それ以外は止める。語の単位で先頭を比べ（`kurokofude maskx` は不可）、`;` `&` `|` `<` `>` `` ` `` `$` `(` `)` 改行を含むものは許可しない（後ろに別のコマンドをつなぐ抜け道を防ぐ）。Read など Bash 以外のツールに許可リストはない
 
 ### 4.2 MCPサーバー（mcp_server.py、Python SDK FastMCP、stdio）
