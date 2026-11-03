@@ -34,7 +34,7 @@
 pip install -e ".[dev]"
 python tools/make_dummy/make.py --out data/raw --count 5
 kurokofude mask data/raw/xxx.tif
-kurokofude eval --truth data/raw/xxx.truth.json --result data/masked/xxx.chiban.json
+kurokofude eval --truth data/truth/xxx.truth.json --result data/masked/xxx.chiban.json
 kurokofude review data/masked/xxx.tif
 pytest
 ```

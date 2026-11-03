@@ -2,6 +2,8 @@
 
 python tools/make_dummy/make.py --source <地図XMLのzipがあるフォルダ> --out <出力先> --count 5
 小さな1枚（CIのフィクスチャ用）は --crop 1000 700 --name sample_small --count 1
+
+正解データは --truth-out に分けて書く。氏名の文字列は入れない（設計書 §6）。
 """
 
 from __future__ import annotations
@@ -66,7 +68,7 @@ def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Labe
         "items": [
             {
                 "chiban": {"text": label.chiban, "quad": quad_to_list(label.chiban_quad)},
-                "name": {"text": label.name, "quad": quad_to_list(label.name_quad)},
+                "name": {"quad": quad_to_list(label.name_quad)},
                 "angle_deg": round(label.angle_deg, QUAD_DECIMALS),
                 "slanted": label.slanted,
             }
@@ -75,14 +77,17 @@ def truth_json(name: str, size: tuple[int, int], sheet: Sheet, labels: list[Labe
     }
 
 
-def write_outputs(out_dir: Path, name: str, rendered, sheet: Sheet, data: MapData, chiban_re: re.Pattern) -> None:
+def write_outputs(
+    out_dir: Path, truth_dir: Path, name: str, rendered, sheet: Sheet, data: MapData, chiban_re: re.Pattern
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    truth_dir.mkdir(parents=True, exist_ok=True)
     tifffile.imwrite(out_dir / f"{name}.tif", rendered.image, photometric="rgb")
     (out_dir / f"{name}.tfw").write_text(
         "\n".join(f"{value:.10f}" for value in rendered.world_file) + "\n", encoding="ascii"
     )
     height, width = rendered.image.shape[:2]
-    (out_dir / f"{name}.truth.json").write_text(
+    (truth_dir / f"{name}.truth.json").write_text(
         json.dumps(truth_json(name, (width, height), sheet, rendered.labels), ensure_ascii=False, indent=1),
         encoding="utf-8",
     )
@@ -94,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ダミー図面を生成する")
     parser.add_argument("--source", type=Path, default=Path("data") / "source")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--truth-out", type=Path, default=Path("data") / "truth")
     parser.add_argument("--count", type=int, default=5)
     parser.add_argument("--seed", type=int, default=20261102)
     parser.add_argument("--name", default="dummy", help="ファイル名の接頭辞。--count 1 ならそのまま使う")
@@ -122,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=tuple(args.crop) if args.crop else None
         )
         name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
-        write_outputs(args.out, name, rendered, sheet, data, chiban_re)
+        write_outputs(args.out, args.truth_out, name, rendered, sheet, data, chiban_re)
         height, width = rendered.image.shape[:2]
         print(f"{name}: {width}x{height}px, 図郭 {sheet.number}, 注記 {len(rendered.labels)} 件")
         made += 1

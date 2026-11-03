@@ -168,7 +168,7 @@ def test_refuses_to_overwrite_the_input(tmp_path):
 
 
 def truth_item(chiban_quad, name_quad):
-    return {"chiban": {"text": "1", "quad": chiban_quad}, "name": {"text": "架空", "quad": name_quad}}
+    return {"chiban": {"text": "1", "quad": chiban_quad}, "name": {"quad": name_quad}}
 
 
 def test_evaluate_exact_mask_is_perfect():

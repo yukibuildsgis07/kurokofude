@@ -112,6 +112,7 @@ def test_fixture_truth_has_slanted_labels_and_no_place_names():
     assert truth["image_size"] == [1000, 700]
     assert any(item["slanted"] for item in truth["items"])
     assert all(len(item["name"]["quad"]) == 4 for item in truth["items"])
+    assert all(set(item["name"]) == {"quad"} for item in truth["items"])  # 氏名の文字列を持たない
     assert {"source", "image_size", "sheet", "scale_denominator", "items"} == set(truth)
 
 

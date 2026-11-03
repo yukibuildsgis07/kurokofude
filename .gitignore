@@ -13,6 +13,7 @@ data/source/
 data/raw/
 data/masked/
 data/cache/
+data/truth/
 
 # Claude Code の個人設定
 .claude/settings.local.json
