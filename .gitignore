@@ -1,0 +1,18 @@
+# 環境
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.DS_Store
+
+# 元データ（登記所備付地図）はリポジトリに含めない
+data/source/
+
+# 生成物
+data/raw/
+data/masked/
+data/cache/
+
+# Claude Code の個人設定
+.claude/settings.local.json

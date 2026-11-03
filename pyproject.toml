@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kurokofude"
+version = "0.1.0"
+description = "AIに図面を渡す前の関所。測量図面の地番の下にある氏名だけを手元のPCで塗りつぶす"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "MIT" }
+dependencies = [
+  "paddlepaddle",
+  "paddleocr",
+  "opencv-python-headless",
+  "numpy",
+  "tifffile",
+  "pyyaml",
+  "fastapi",
+  "uvicorn",
+  "mcp",
+  "shapely",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pillow"]
+
+[project.scripts]
+kurokofude = "kurokofude.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"kurokofude.review" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
