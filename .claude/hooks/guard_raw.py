@@ -24,6 +24,7 @@ PATH_FIELDS = ("file_path", "path", "notebook_path")
 PATTERN_FIELDS = ("pattern", "glob")
 GLOB_CHARS = "*?["
 ALLOWED_COMMANDS_KEY = "hook_allowed_commands"
+OPEN_DIRS_KEY = "hook_open_dirs"
 # 許可リストのコマンドに含めてはいけない文字（後ろに別のコマンドをつなぐ抜け道になる）
 COMMAND_CHAIN_CHARS = ";&|<>`$()\n\r"
 # シェル上でパスの区切りになりうる文字
@@ -89,12 +90,48 @@ def path_hits_protected(raw_path: str, cwd: Path, names: set[str]) -> bool:
     )
 
 
-def command_hits_protected(command: str, cwd: Path, names: set[str]) -> bool:
+def load_parent_rule(project_dir: Path) -> tuple[set[str], set[str]]:
+    """保護ディレクトリの親の名前（data）と、その下で開いてよい子の名前を返す。"""
+    protected = list(DEFAULT_PROTECTED_DIRS) + read_config_list(project_dir, "protected_dirs")
+    parents = {split_components(d)[-2] for d in protected if len(split_components(d)) >= 2}
+    open_children = {split_components(d)[-1] for d in read_config_list(project_dir, OPEN_DIRS_KEY) if d}
+    return parents, open_children
+
+
+def parent_rule_hits(components: list[str], parents: set[str], open_children: set[str]) -> bool:
+    """親の名前は、開いてよい子が続く形でなければ止める（`grep -r x data` などの穴を塞ぐ）。"""
+    for index, component in enumerate(components):
+        if component_is_protected(component, parents):
+            following = components[index + 1] if index + 1 < len(components) else None
+            if following not in open_children:
+                return True
+    return False
+
+
+def path_inside_project(token: str, cwd: Path, project_dir: Path) -> str | None:
+    """正規化してプロジェクト内なら相対パスを返す。置き場所の親にある data などを誤判定しない。"""
+    joined = os.path.normpath(cwd / os.path.expanduser(token.replace("\\", "/")))
+    try:
+        relative = os.path.relpath(joined, os.path.normpath(project_dir))
+    except ValueError:  # Windows でドライブが違う
+        return None
+    return None if relative.startswith("..") else relative
+
+
+def command_hits_protected(command: str, cwd: Path, project_dir: Path, names: set[str]) -> bool:
     """シェルを解釈せず、語に分けて判定する。`ra""w` のような引用符の分断も潰す。"""
+    parents, open_children = load_parent_rule(project_dir)
     unquoted = command.replace('"', "").replace("'", "")
     for text in {command, unquoted}:
         for token in TOKEN_SPLIT.split(text):
-            if token and path_hits_protected(token, cwd, names):
+            if not token:
+                continue
+            if path_hits_protected(token, cwd, names):
+                return True
+            if parent_rule_hits(split_components(token), parents, open_children):
+                return True
+            relative = path_inside_project(token, cwd, project_dir)
+            if relative and parent_rule_hits(split_components(relative), parents, open_children):
                 return True
     return False
 
@@ -114,7 +151,7 @@ def should_block(payload: dict) -> bool:
         if isinstance(value, str) and value and text_hits_protected(value, names):
             return True
     command = tool_input.get("command")
-    if not isinstance(command, str) or not command_hits_protected(command, cwd, names):
+    if not isinstance(command, str) or not command_hits_protected(command, cwd, project_dir, names):
         return False
     return not command_is_allowed(command, read_config_list(project_dir, ALLOWED_COMMANDS_KEY))
 

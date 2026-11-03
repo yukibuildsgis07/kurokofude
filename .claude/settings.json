@@ -1,4 +1,11 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(./data/raw/**)",
+      "Glob(./data/raw/**)",
+      "Grep(./data/raw/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

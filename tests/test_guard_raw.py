@@ -1,6 +1,7 @@
 """関所フックの判定を、実際に標準入力へ JSON を渡して確かめる。"""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -104,6 +105,63 @@ def test_allowed_commands_pass_with_protected_path(command):
 )
 def test_other_commands_stay_blocked(command):
     assert run_hook({"command": command}).returncode == BLOCK
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -r x data",
+        "ls data",
+        "ls data/",
+        "find data -name a.tif",
+        "ls data/source",
+        "ls data/masked/..",
+        "cat data/masked/../source/a.txt",
+        "ls d*/*",
+        "python -c \"open('data/' + 'raw' + '/a.tif')\"",
+        "python -c \"open('data/'+'ra'+'w/a.tif')\"",
+        "ls DATA",
+    ],
+)
+def test_parent_of_protected_dir_is_blocked_unless_open_child_follows(command):
+    assert run_hook({"command": command}).returncode == BLOCK
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "ls data/masked",
+        "cat data/truth/a.truth.json",
+        "rm data/cache/a.json",
+        "python x.py data/ref/a.geojson",
+        "cat metadata/a.txt",
+        "python tools/make_dummy/make.py --source data/source --out tests/fixtures",
+    ],
+)
+def test_open_children_and_other_words_pass(command):
+    assert run_hook({"command": command}).returncode == ALLOW
+
+
+def test_project_placed_under_a_folder_named_like_the_parent(tmp_path):
+    """プロジェクトの置き場所の親に data があっても、それだけでは止めない。"""
+    project = tmp_path / "data" / "kurokofude"
+    (project / "configs").mkdir(parents=True)
+    (project / "configs" / "default.yaml").write_text(
+        "hook_open_dirs:\n  - data/masked\n", encoding="utf-8"
+    )
+    payload = json.dumps({"tool_input": {"command": "pytest"}, "cwd": str(project)})
+    env = {**os.environ, "CLAUDE_PROJECT_DIR": str(project)}
+    result = subprocess.run(
+        [sys.executable, str(HOOK)], input=payload, capture_output=True, text=True, encoding="utf-8", env=env
+    )
+    assert result.returncode == ALLOW
+
+
+def test_settings_deny_read_glob_grep_on_protected_dir():
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    deny = settings["permissions"]["deny"]
+    for tool in ("Read", "Glob", "Grep"):
+        assert f"{tool}(./data/raw/**)" in deny
 
 
 def test_allow_list_does_not_apply_to_read():
