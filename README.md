@@ -32,6 +32,8 @@ kurokofude batch <図面のフォルダ>
 kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図面>.chiban.json --image <図面.tif>
 ```
 
+図枠の下辺ぜんぶが表題欄の図面（河川境界確定図など）では、`--config configs/bottom_strip.yaml` を付けてください。
+
 ## 関所について
 
 塗る前の図面を Claude に渡さないための守りは3層です。MCP の設計（生データを返さない）、フック（`.claude/hooks/guard_raw.py`）、Claude Code 本体の deny 設定（`.claude/settings.json`）です。
