@@ -15,6 +15,7 @@ from kurokofude.config import load_config
 from kurokofude.detect import classify_boxes, normalize_text
 from kurokofude.evaluate import average_scores, evaluate
 from kurokofude.geometry import FrameResolver, angle_difference_deg, quad_frame
+from kurokofude.mixed import resolve_mixed
 from kurokofude.mask import fill_polygons, protected_area, subtract_protected, write_outputs
 from kurokofude.pair import Pair, pair_names
 from kurokofude.refine import cut_offset, refine_pair, tight_box, tighten
@@ -615,6 +616,116 @@ def test_mask_file_labels_each_kind_of_paint(tmp_path, monkeypatch):
     assert [u["text"] for u in result["uncertain"]] == ["2024"]
     assert summary.masks == 3
     assert summary.chiban == 1
+
+
+# mixed
+
+
+def mixed_gray():
+    """左に氏名（幅80）、広い隙間、右に地番（幅80）のインク。"""
+    gray = np.full((300, 500), 240, dtype=np.uint8)
+    cv2.fillPoly(gray, [np.array([[110, 150], [190, 150], [190, 170], [110, 170]], dtype=np.int32)], 20)
+    cv2.fillPoly(gray, [np.array([[215, 150], [295, 150], [295, 170], [215, 170]], dtype=np.int32)], 20)
+    return gray
+
+
+def mixed_box(text, in_region=False):
+    return {
+        "text": text,
+        "score": 0.9,
+        "quad": [[100.0, 145.0], [305.0, 145.0], [305.0, 175.0], [100.0, 175.0]],
+        "in_region": in_region,
+    }
+
+
+def test_mixed_is_recognized_when_box_has_placeholder_and_digits():
+    both = box(rect(100, 100, 60, 20), "□□□273-10")
+    only_marks = box(rect(100, 200, 60, 20), "□□")
+    result = classify_boxes([both, only_marks], IMAGE_SIZE, CONFIG)
+    assert [b["text"] for b in result.mixed] == ["□□□273-10"]
+    assert only_marks not in result.mixed
+    assert only_marks["text"] in [b["text"] for b in result.text + result.uncertain]
+
+
+def test_mixed_splits_name_side_from_chiban_at_ink_valley():
+    frame_of = quad_frame
+    result = resolve_mixed([mixed_box("□□□273-10")], mixed_gray(), CONFIG, frame_of)
+    assert result.masked == []
+    chiban = result.chiban[0]
+    assert chiban["text"] == "273-10"
+    assert chiban["status"] == "split"
+    assert chiban["score"] == pytest.approx(0.9 * CONFIG["chiban"]["normalized_score_factor"])
+    assert np.array(chiban["quad"])[:, 0].min() == pytest.approx(202.5, abs=8)
+    assert np.array(result.split_masks[0])[:, 0].max() == pytest.approx(202.5, abs=8)
+
+
+def test_mixed_split_does_not_fall_into_gap_between_family_and_given_name():
+    """姓と名の隙間ではなく、氏名と地番の隙間で分ける。名の字が地番側に残らない。"""
+    gray = np.full((300, 500), 240, dtype=np.uint8)
+    for x0, x1 in ((110, 145), (165, 185), (210, 300)):  # 姓、名、地番
+        cv2.fillPoly(gray, [np.array([[x0, 150], [x1, 150], [x1, 170], [x0, 170]], dtype=np.int32)], 20)
+    item = mixed_box("□□□273-10")
+    item["quad"] = [[100.0, 145.0], [310.0, 145.0], [310.0, 175.0], [100.0, 175.0]]
+    result = resolve_mixed([item], gray, CONFIG, quad_frame)
+    assert 185 <= np.array(result.chiban[0]["quad"])[:, 0].min() <= 210
+
+
+def test_mixed_ignores_narrow_gaps_between_digits():
+    gray = np.full((300, 500), 240, dtype=np.uint8)
+    for x0 in range(110, 300, 22):  # 文字の間が2pxしかない
+        cv2.fillPoly(gray, [np.array([[x0, 150], [x0 + 20, 150], [x0 + 20, 170], [x0, 170]], dtype=np.int32)], 20)
+    item = mixed_box("□□□273-10")
+    result = resolve_mixed([item], gray, CONFIG, quad_frame)
+    assert result.masked == [item["quad"]]
+
+
+def test_mixed_with_digits_first_keeps_left_side():
+    result = resolve_mixed([mixed_box("273-10□□□")], mixed_gray(), CONFIG, quad_frame)
+    assert np.array(result.chiban[0]["quad"])[:, 0].max() < 215
+    assert np.array(result.split_masks[0])[:, 0].min() > 190
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["□□2024-3-15", "□12□34", "□□□123456"],
+)
+def test_mixed_is_masked_whole_when_digit_side_is_not_chiban(text):
+    item = mixed_box(text)
+    result = resolve_mixed([item], mixed_gray(), CONFIG, quad_frame)
+    assert result.chiban == [] and result.split_masks == []
+    assert result.masked == [item["quad"]]
+
+
+def test_mixed_is_masked_whole_without_valley():
+    gray = np.full((300, 500), 240, dtype=np.uint8)
+    cv2.fillPoly(gray, [np.array([[100, 150], [305, 150], [305, 170], [100, 170]], dtype=np.int32)], 20)
+    item = mixed_box("□□□273-10")
+    result = resolve_mixed([item], gray, CONFIG, quad_frame)
+    assert result.masked == [item["quad"]]
+
+
+def test_mixed_in_exclude_region_is_masked_whole():
+    item = mixed_box("□□□273-10", in_region=True)
+    result = resolve_mixed([item], mixed_gray(), CONFIG, quad_frame)
+    assert result.masked == [item["quad"]] and result.chiban == []
+
+
+def test_mask_file_splits_mixed_box_and_paints_only_name_side(tmp_path, monkeypatch):
+    from kurokofude import pipeline
+
+    source = tmp_path / "a.tif"
+    gray = mixed_gray()
+    tifffile.imwrite(source, np.stack([gray] * 3, axis=-1), photometric="rgb")
+    item = {k: v for k, v in mixed_box("□□□273-10").items() if k != "in_region"}
+    monkeypatch.setattr(pipeline, "run_ocr", lambda *_args: [item])
+    pipeline.mask_file(source, CONFIG, tmp_path / "out", tmp_path / "cache")
+    result = json.loads((tmp_path / "out" / "a.chiban.json").read_text(encoding="utf-8"))
+    assert [c["status"] for c in result["chiban"]] == ["split"]
+    assert [c["text"] for c in result["chiban"]] == ["273-10"]
+    assert [m["status"] for m in result["masks"]] == ["split"]
+    painted = tifffile.imread(tmp_path / "out" / "a.tif")
+    assert painted[160, 150].tolist() == [0, 0, 0]  # 氏名側
+    assert painted[160, 250].tolist() == [20, 20, 20]  # 地番側
 
 
 # batch

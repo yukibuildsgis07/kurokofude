@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .geometry import quad_frame
-from .ocr import digit_ratio
+from .ocr import ASCII_DIGITS, PLACEHOLDER, digit_ratio
 
 EXCLUDE_MODE_ALL = "all"
 EXCLUDE_MODES = {"chiban_only", EXCLUDE_MODE_ALL}
@@ -32,6 +32,7 @@ class Classified:
     uncertain: list[dict]  # (b) 数字が主体だが地番の形でない。残して人が見る
     text: list[dict]  # (c) それ以外。塗る
     title_text: list[dict]  # (c) のうち除外領域の中。塗るが、地番とペアにしない
+    mixed: list[dict]  # □ と数字の両方を含む枠。氏名と地番が1つになっている（§13.2）
 
 
 def _plain(text: str) -> str:
@@ -72,7 +73,7 @@ def classify_boxes(boxes: list[dict], image_size: tuple[int, int], config: dict)
     mode = config["exclude_mode"]
     if mode not in EXCLUDE_MODES:
         raise ValueError(f"exclude_mode が不正です: {mode}")
-    result = Classified([], [], [], [])
+    result = Classified([], [], [], [], [])
     for box in boxes:
         in_region = in_exclude_region(np.mean(box["quad"], axis=0), image_size, config["exclude_regions"])
         if in_region and mode == EXCLUDE_MODE_ALL:
@@ -83,6 +84,8 @@ def classify_boxes(boxes: list[dict], image_size: tuple[int, int], config: dict)
             changed = text != _plain(box["text"])
             score = box["score"] * chiban_cfg["normalized_score_factor"] if changed else box["score"]
             result.chiban.append({**box, "text": text, "score": score})
+        elif PLACEHOLDER in text and any(c in ASCII_DIGITS for c in text):
+            result.mixed.append({**box, "text": text, "in_region": in_region})
         elif digit_ratio(text) >= config["ocr"]["digit_ratio_min"]:
             result.uncertain.append({**box, "text": text})
         elif in_region:

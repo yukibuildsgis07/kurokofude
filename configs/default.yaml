@@ -34,6 +34,11 @@ mask:
   protect_margin_px: 1  # 地番の枠をこれだけ膨らませて、塗りから引く
   protect_padding_px: 1 # 地番の枠をインクまで詰めるときに残す幅
   core_valley_max_ratio: 0.5 # 枠の端まで続くインクを谷で切る条件（最大に対する割合）
+mixed:                  # 氏名と地番が1つになった枠の分割（§13.2）
+  search_ratio: 0.25        # 仮の分割位置の前後を探す幅（長辺に対する割合）
+  valley_max_ink_ratio: 0.2 # 谷とみなす列のインク（最大に対する割合）
+  min_gap_ratio: 0.3        # 谷の最小の幅（枠の高さに対する割合）。数字どうしの隙間を谷にしない
+  name_char_width: 2.0      # □ 1つの幅（数字1文字に対する倍数）
 evaluate:
   overmask_margin_px: 3   # 塗りすぎ率で許容する、正解の氏名枠からの余白
 protected_dirs:

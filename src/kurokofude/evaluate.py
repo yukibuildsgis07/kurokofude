@@ -7,7 +7,7 @@ import numpy as np
 from shapely.geometry import Point, Polygon
 from shapely.ops import unary_union
 
-from .mask import STATUS_IN_TITLE_BLOCK, STATUS_UNPAIRED, fill_polygons
+from .mask import STATUS_IN_TITLE_BLOCK, STATUS_MIXED_MASKED, STATUS_SPLIT, STATUS_UNPAIRED, fill_polygons
 
 STATUS_REMOVED = "removed"
 PERCENT = 100.0
@@ -82,6 +82,8 @@ def evaluate(truth: dict, result: dict, gray: np.ndarray, ink_threshold: int, ov
         "masks": len(result["masks"]),
         "unpaired_masks": sum(1 for m in result["masks"] if m.get("status") == STATUS_UNPAIRED),
         "in_title_block_masks": sum(1 for m in result["masks"] if m.get("status") == STATUS_IN_TITLE_BLOCK),
+        "split_masks": sum(1 for m in result["masks"] if m.get("status") == STATUS_SPLIT),
+        "mixed_masked": sum(1 for m in result["masks"] if m.get("status") == STATUS_MIXED_MASKED),
         "uncertain_chiban": len(result.get("uncertain", [])),
         "excluding_line_overlaps": _item_scores(clear_items, masks_geometry, detected, ink, painted),
     }

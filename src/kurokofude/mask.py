@@ -20,6 +20,8 @@ JOIN_STYLE_MITRE = 2  # 四角形を角を保ったまま膨らませる
 STATUS_AUTO = "auto"
 STATUS_UNPAIRED = "unpaired"
 STATUS_IN_TITLE_BLOCK = "in_title_block"
+STATUS_SPLIT = "split"
+STATUS_MIXED_MASKED = "mixed_masked"
 STATUS_UNCERTAIN_CHIBAN = "uncertain_chiban"
 # GeoTIFF のタグ：ModelPixelScale, ModelTiepoint, ModelTransformation, GeoKey×3, GDAL_METADATA, GDAL_NODATA
 GEO_TAG_CODES = (33550, 33922, 34264, 34735, 34736, 34737, 42112, 42113)
@@ -99,7 +101,7 @@ def subtract_protected(polygon, protected) -> list[list[list[float]]]:
     return _simple_pieces(shape.difference(protected))
 
 
-def build_masks(pairs: list[Pair], unpaired: list[list], title: list[list], protected) -> tuple[list[dict], set[int]]:
+def build_masks(pairs: list[Pair], others: list[tuple[list, str]], protected) -> tuple[list[dict], set[int]]:
     """塗りの項目と、塗りが残った地番の id を返す。ポリゴン1つが1項目。"""
     masks: list[dict] = []
     masked_ids: set[int] = set()
@@ -108,7 +110,7 @@ def build_masks(pairs: list[Pair], unpaired: list[list], title: list[list], prot
         if pieces:
             masked_ids.add(id(pair.chiban))
         masks.extend({"quad": piece, "chiban": pair.chiban["text"], "status": STATUS_AUTO} for piece in pieces)
-    for polygons, status in ((unpaired, STATUS_UNPAIRED), (title, STATUS_IN_TITLE_BLOCK)):
+    for polygons, status in others:
         for polygon in polygons:
             masks.extend(
                 {"quad": piece, "chiban": None, "status": status} for piece in subtract_protected(polygon, protected)
@@ -135,6 +137,7 @@ def build_result(
                 "quad": box["quad"],
                 "score": box["score"],
                 "masked_below": id(box) in masked_ids,
+                **({"status": box["status"]} if "status" in box else {}),
             }
             for box in chiban_boxes
         ],
@@ -156,6 +159,8 @@ def write_outputs(
     uncertain: list[dict] = (),
     title: list[list] = (),
     protected_quads: list[list] | None = None,
+    split: list[list] = (),
+    mixed_masked: list[list] = (),
 ) -> tuple[Path, dict]:
     in_path, out_dir = Path(in_path), Path(out_dir)
     out_tif = out_dir / in_path.name
@@ -164,7 +169,13 @@ def write_outputs(
     if protected_quads is None:
         protected_quads = [box["quad"] for box in [*chiban_boxes, *uncertain]]
     protected = protected_area(protected_quads, mask_cfg["protect_margin_px"])
-    masks, masked_ids = build_masks(pairs, list(unpaired), list(title), protected)
+    others = [
+        (list(unpaired), STATUS_UNPAIRED),
+        (list(title), STATUS_IN_TITLE_BLOCK),
+        (list(split), STATUS_SPLIT),
+        (list(mixed_masked), STATUS_MIXED_MASKED),
+    ]
+    masks, masked_ids = build_masks(pairs, others, protected)
     size = write_masked_tiff(in_path, out_tif, [mask["quad"] for mask in masks], mask_cfg["color"])
     world_file = in_path.with_suffix(WORLD_FILE_SUFFIX)
     if world_file.is_file():
