@@ -226,6 +226,53 @@ def test_title_block_stays_inside_default_exclude_region(shape):
     assert cols.min() >= min_x - 3 and rows.min() >= min_y - 3  # 文字も枠からはみ出さない
 
 
+def test_parcel_area_ratio_ignores_parcels_without_numeric_chiban():
+    import re
+
+    import make
+
+    data = moj_xml.parse_map(XML)
+    sheet = data.sheets[0]
+    chiban_re = re.compile(r"^\d{1,5}(-\d{1,4})?$")
+    assert make.parcel_area_ratio(sheet, data, chiban_re) == pytest.approx(100 / (150 * 200))
+    data.parcels["H1"].chiban = "地区外-1"
+    assert make.parcel_area_ratio(sheet, data, chiban_re) == 0.0
+    config = {"scale_denominator": 500, "min_parcels_in_sheet": 0, "min_parcel_area_ratio": 0.5}
+    assert make.pick_sheet(data, random.Random(1), config, chiban_re) is None
+
+
+def test_scan_skew_rotates_title_block_too():
+    """表題欄も描き終えてから画像全体を回す。表題欄の枠の上辺が、回転角どおりに傾く。"""
+    config = yaml.safe_load((ROOT / "tools" / "make_dummy" / "config.yaml").read_text(encoding="utf-8"))
+    config["scan"] = {**config["scan"], "noise_sigma": 0.0, "fade_min": 1.0, "blur_sigma": 0.1}
+    data = moj_xml.parse_map(XML)
+    sheet = data.sheets[0]
+    font = next(Path(f) for f in config["fonts"] if Path(f).is_file()) if any(Path(f).is_file() for f in config["fonts"]) else None
+    if font is None:
+        pytest.skip("日本語フォントがない")
+    flat, tilted = None, None
+    for seed in range(40):
+        rendered = render.render_sheet(sheet, list(data.parcels.values()), [], config, font, seed=seed)
+        a, d, b, e, c, f = rendered.world_file
+        angle = np.degrees(np.arctan2(-d, a))  # 画像に対する回転角
+        if abs(angle) > 1.5:
+            tilted = (rendered.image, angle)
+            break
+    assert tilted is not None
+    image, angle = tilted
+    gray = image.mean(axis=2)
+    height, width = gray.shape
+    title = config["title_block"]
+    x0 = int(width * (1 - title["width_ratio"])) + title["padding_px"]
+    columns = [x0 + 40, width - title["padding_px"] - 40]
+    tops = []
+    for x in columns:  # 表題欄の枠の上辺を、下から上へ探す
+        rows = np.flatnonzero(gray[int(height * 0.75):, x] < 128)
+        tops.append(int(height * 0.75) + rows[0])
+    measured = np.degrees(np.arctan2(tops[0] - tops[1], columns[1] - columns[0]))
+    assert measured == pytest.approx(angle, abs=0.5)
+
+
 def test_config_uses_only_plane_coordinate_system_8():
     config = yaml.safe_load((ROOT / "tools" / "make_dummy" / "config.yaml").read_text(encoding="utf-8"))
     assert config["source"]["coordinate_system"] == "公共座標8系"

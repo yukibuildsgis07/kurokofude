@@ -19,6 +19,8 @@ from pathlib import Path
 import numpy as np
 import tifffile
 import yaml
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -41,6 +43,19 @@ def iter_map_sources(source_dir: Path, coordinate_system: str, seed: int):
             yield xml_bytes
 
 
+def parcel_area_ratio(sheet: Sheet, data: MapData, chiban_re: re.Pattern) -> float:
+    """数字の地番を持つ筆が、図郭（紙）の面積に占める割合。地区外などは数えない（§17）。"""
+    frame = Polygon([sheet.corners[key] for key in ("ul", "ur", "lr", "ll")])
+    parcels = unary_union(
+        [
+            data.parcels[pid].polygon.buffer(0)
+            for pid in sheet.parcel_ids
+            if pid in data.parcels and chiban_re.fullmatch(data.parcels[pid].chiban)
+        ]
+    )
+    return parcels.intersection(frame).area / frame.area if frame.area else 0.0
+
+
 def pick_sheet(data: MapData, rng: random.Random, source_cfg: dict, chiban_re: re.Pattern) -> Sheet | None:
     candidates = [
         sheet
@@ -52,6 +67,7 @@ def pick_sheet(data: MapData, rng: random.Random, source_cfg: dict, chiban_re: r
             if pid in data.parcels and chiban_re.fullmatch(data.parcels[pid].chiban)
         )
         >= source_cfg["min_parcels_in_sheet"]
+        and parcel_area_ratio(sheet, data, chiban_re) >= source_cfg["min_parcel_area_ratio"]
     ]
     return rng.choice(candidates) if candidates else None
 

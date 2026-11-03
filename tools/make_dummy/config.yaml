@@ -3,6 +3,7 @@ source:
   coordinate_system: 公共座標8系   # これと完全に一致する地図XMLだけ使う
   scale_denominator: 500
   min_parcels_in_sheet: 25         # 筆が少なすぎる図郭は使わない
+  min_parcel_area_ratio: 0.5       # 数字の地番の筆が図郭の面積に占める割合の下限（空白の多い図郭を外す）
   chiban_pattern: '^\d{1,5}(-\d{1,4})?$'  # 数字の地番だけ描く（筆界未定地などは線のみ）
   min_one_digit: 3                 # 1枚に必ず入れる1桁の地番の数。足りなければ置き換える
   min_two_digit: 3                 # 同じく2桁
