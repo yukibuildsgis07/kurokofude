@@ -28,7 +28,8 @@ OCRのモデルは初回実行時に huggingface.co からダウンロードさ�
 
 ```
 kurokofude mask <図面.tif>
-kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図面>.chiban.json
+kurokofude batch <図面のフォルダ>
+kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図面>.chiban.json --image <図面.tif>
 ```
 
 ## トラブルシューティング

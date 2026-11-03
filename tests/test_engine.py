@@ -12,8 +12,8 @@ import tifffile
 from kurokofude import ocr as ocr_module
 from kurokofude.config import load_config
 from kurokofude.detect import classify_boxes, normalize_text
-from kurokofude.evaluate import evaluate
-from kurokofude.geometry import angle_difference_deg, quad_frame
+from kurokofude.evaluate import average_scores, evaluate
+from kurokofude.geometry import FrameResolver, angle_difference_deg, quad_frame
 from kurokofude.mask import fill_polygons, write_outputs
 from kurokofude.pair import pair_names
 from kurokofude.refine import cut_offset, refine_pair, tighten
@@ -21,6 +21,7 @@ from kurokofude.refine import cut_offset, refine_pair, tighten
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = load_config()
 IMAGE_SIZE = (1000, 700)
+FIXTURE_SURVIVAL_FLOOR = 80.0
 
 
 def rect(cx, cy, w, h, angle_deg=0.0):
@@ -146,6 +147,30 @@ def test_pair_takes_every_fragment_of_a_split_name():
     given = box(rect(330, 326, 40, 18))
     pairs = pair_names([chiban, family, given], [chiban], CONFIG["pair"])
     assert {id(p.source) for p in pairs} == {id(family), id(given)}
+
+
+@pytest.mark.parametrize("angle", [0, 25])
+def test_one_digit_chiban_borrows_angle_from_neighbors(angle):
+    """縦長の1桁の地番でも、近傍の細長い枠の角度で真下の氏名を選べる。"""
+    theta = np.radians(angle)
+    down = np.array([np.sin(theta), np.cos(theta)])
+    center = np.array([300.0, 300.0])
+    chiban = box(rect(*center, 12, 22, angle), "5")
+    name = box(rect(*(center + down * 24), 80, 18, angle))
+    neighbors = [box(rect(300 + dx, 150, 80, 18, angle)) for dx in (-100, 0, 100)]
+    boxes = [chiban, name, *neighbors]
+    assert pair_names([name], [chiban], CONFIG["pair"]) == []  # 自分の長辺だと倒れて選べない
+    frame_of = FrameResolver(boxes, CONFIG["angle"]).frame
+    pairs = pair_names([name], [chiban], CONFIG["pair"], frame_of)
+    assert [p.source for p in pairs] == [name]
+
+
+def test_resolver_uses_overall_median_then_zero_and_keeps_long_boxes():
+    long_box = rect(100, 100, 80, 18, 20)
+    assert FrameResolver([box(long_box)], CONFIG["angle"]).frame(long_box).angle_deg == pytest.approx(20)
+    square = rect(600, 600, 20, 20, 45)
+    assert FrameResolver([box(long_box)], CONFIG["angle"]).frame(square).angle_deg == pytest.approx(20)
+    assert FrameResolver([], CONFIG["angle"]).frame(square).angle_deg == 0.0
 
 
 # refine
@@ -293,6 +318,16 @@ def truth_item(chiban_quad, name_quad):
     return {"chiban": {"text": "1", "quad": chiban_quad}, "name": {"quad": name_quad}}
 
 
+THRESHOLD = CONFIG["mask"]["ink_threshold"]
+
+
+def gray_with_ink(*quads):
+    gray = np.full((100, 120), 240, dtype=np.uint8)
+    for quad in quads:
+        cv2.fillPoly(gray, [np.round(np.array(quad)).astype(np.int32)], 20)
+    return gray
+
+
 def test_evaluate_exact_mask_is_perfect():
     name, chiban = rect(50, 50, 40, 10), rect(50, 30, 20, 10)
     truth = {"items": [truth_item(chiban, name)]}
@@ -300,7 +335,7 @@ def test_evaluate_exact_mask_is_perfect():
         "chiban": [{"text": "1", "center": [50, 30], "quad": chiban, "score": 1.0}],
         "masks": [{"quad": name, "chiban": "1", "status": "auto"}],
     }
-    scores = evaluate(truth, result)
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
     assert scores["name_coverage_pct"] == 100.0
     assert scores["overmask_pct"] == 0.0
     assert scores["chiban_survival_pct"] == 100.0
@@ -314,10 +349,10 @@ def test_evaluate_counts_half_coverage_overmask_and_painted_chiban():
     half_outside = [[50, 45], [90, 45], [90, 55], [50, 55]]
     truth = {"items": [truth_item(chiban, name)]}
     result = {
-        "chiban": [{"text": "9", "center": [200, 200], "quad": chiban, "score": 1.0}],
+        "chiban": [{"text": "9", "center": [100, 90], "quad": chiban, "score": 1.0}],
         "masks": [{"quad": half_outside, "chiban": "9", "status": "auto"}, {"quad": chiban, "chiban": "9", "status": "added"}],
     }
-    scores = evaluate(truth, result)
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
     assert scores["name_coverage_pct"] == 50.0
     assert scores["chiban_survival_pct"] == 0.0
     assert scores["chiban_detection_pct"] == 0.0
@@ -325,11 +360,55 @@ def test_evaluate_counts_half_coverage_overmask_and_painted_chiban():
     assert 0 < scores["overmask_pct"] < 100
 
 
-def test_evaluate_ignores_removed_masks():
+def test_evaluate_survival_ignores_paint_on_blank_margin_of_chiban_box():
+    """正解の枠の余白に塗りが触れただけでは、地番は生きている（§11.5）。"""
+    chiban_box = [[40, 20], [60, 20], [60, 40], [40, 40]]
+    ink_only = [[44, 22], [56, 22], [56, 32], [44, 32]]
+    touching_margin = [[30, 36], [70, 36], [70, 46], [30, 46]]
+    truth = {"items": [truth_item(chiban_box, rect(50, 41, 40, 10))]}
+    result = {"chiban": [], "masks": [{"quad": touching_margin, "chiban": None, "status": "unpaired"}]}
+    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD)["chiban_survival_pct"] == 100.0
+    touching_ink = [[30, 30], [70, 30], [70, 46], [30, 46]]
+    result["masks"][0]["quad"] = touching_ink
+    assert evaluate(truth, result, gray_with_ink(ink_only), THRESHOLD)["chiban_survival_pct"] == 0.0
+
+
+def test_evaluate_ignores_removed_masks_and_counts_review_items():
     name, chiban = rect(50, 50, 40, 10), rect(50, 30, 20, 10)
     truth = {"items": [truth_item(chiban, name)]}
-    result = {"chiban": [], "masks": [{"quad": name, "chiban": "1", "status": "removed"}]}
-    assert evaluate(truth, result)["name_coverage_pct"] == 0.0
+    result = {
+        "chiban": [],
+        "uncertain": [{"text": "273.19", "quad": chiban, "score": 0.5, "status": "uncertain_chiban"}],
+        "masks": [
+            {"quad": name, "chiban": "1", "status": "removed"},
+            {"quad": rect(100, 80, 10, 10), "chiban": None, "status": "unpaired"},
+        ],
+    }
+    scores = evaluate(truth, result, gray_with_ink(chiban, name), THRESHOLD)
+    assert scores["name_coverage_pct"] == 0.0
+    assert scores["unpaired_masks"] == 1
+    assert scores["uncertain_chiban"] == 1
+
+
+def test_evaluate_reports_scores_excluding_line_overlaps():
+    clear_chiban, clear_name = rect(30, 20, 20, 10), rect(30, 40, 40, 10)
+    hard_chiban, hard_name = rect(90, 20, 20, 10), rect(90, 40, 40, 10)
+    truth = {
+        "items": [
+            {**truth_item(clear_chiban, clear_name), "overlaps_line": False},
+            {**truth_item(hard_chiban, hard_name), "overlaps_line": True},
+        ]
+    }
+    result = {"chiban": [], "masks": [{"quad": clear_name, "chiban": None, "status": "unpaired"}]}
+    scores = evaluate(truth, result, gray_with_ink(clear_chiban, hard_chiban), THRESHOLD)
+    assert scores["name_coverage_pct"] == 50.0
+    assert scores["excluding_line_overlaps"]["name_coverage_pct"] == 100.0
+    assert scores["excluding_line_overlaps"]["truth_items"] == 1
+
+
+def test_average_scores_handles_nested_values():
+    rows = [{"a": 1.0, "b": {"c": 2.0}}, {"a": 3.0, "b": {"c": 4.0}}]
+    assert average_scores(rows) == {"a": 2.0, "b": {"c": 3.0}}
 
 
 # ocr（エンジンなし）
@@ -413,7 +492,7 @@ def test_fixture_has_no_name_strings(small_ocr):
     assert not any(re.search(r"[぀-鿿]", b["text"]) for b in small_ocr)
 
 
-def test_pipeline_on_fixture_never_paints_chiban(small_ocr):
+def test_pipeline_on_fixture_keeps_most_chiban(small_ocr):
     truth = json.loads((FIXTURES / "sample_small.truth.json").read_text(encoding="utf-8"))
     classified = classify_boxes(small_ocr, tuple(truth["image_size"]), CONFIG)
     assert classified.chiban
@@ -426,4 +505,5 @@ def test_pipeline_on_fixture_never_paints_chiban(small_ocr):
         "chiban": [{"text": b["text"], "center": np.mean(b["quad"], axis=0).tolist()} for b in classified.chiban],
         "masks": [{"quad": p.quad, "chiban": p.chiban["text"], "status": "auto"} for p in pairs],
     }
-    assert evaluate(truth, result)["masks"] == len(pairs)
+    # 線と重なる難しい注記を含む1枚の現状値を下回らないこと。実物化の後で見直す
+    assert evaluate(truth, result, gray, THRESHOLD)["chiban_survival_pct"] >= FIXTURE_SURVIVAL_FLOOR

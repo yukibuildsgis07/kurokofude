@@ -20,6 +20,10 @@ pair:
   max_angle_deg: 10
   max_gap: 2.5          # 地番の高さの倍数
   max_lateral: 1.0      # 地番の幅の倍数
+angle:                  # 正方形に近い枠の角度の決め方（§11.6）
+  square_aspect_max: 1.5    # 縦横比がこれ以下なら自分の長辺を使わない
+  reference_aspect_min: 2.0 # 角度の参考にする枠の縦横比
+  neighbors: 3              # 参考にする近傍の枠の数
 mask:
   color: [0, 0, 0]      # 画像のチャンネル順（RGB）
   unpaired_text: true   # 地番とペアにならない文字も塗る（迷ったら塗る、人が外す）
@@ -31,4 +35,5 @@ protected_dirs:
 hook_allowed_commands:   # 保護ディレクトリを含んでも Bash で通すコマンドの先頭（§4.1）
   - kurokofude mask
   - kurokofude batch
+  - kurokofude eval
   - python tools/make_dummy/make.py

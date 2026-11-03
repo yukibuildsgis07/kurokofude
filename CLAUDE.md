@@ -34,7 +34,9 @@
 pip install -e ".[dev]"
 python tools/make_dummy/make.py --out data/raw --count 5
 kurokofude mask data/raw/xxx.tif
-kurokofude eval --truth data/truth/xxx.truth.json --result data/masked/xxx.chiban.json
+kurokofude eval --truth data/truth/xxx.truth.json --result data/masked/xxx.chiban.json --image data/raw/xxx.tif
+kurokofude eval --truth data/truth --result data/masked --image data/raw   # 全枚と平均
+kurokofude batch data/raw
 kurokofude review data/masked/xxx.tif
 pytest
 ```

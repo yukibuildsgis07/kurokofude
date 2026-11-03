@@ -8,13 +8,17 @@ import sys
 import time
 from pathlib import Path
 
+import cv2
+
 from .config import load_config
-from .evaluate import evaluate
+from .evaluate import average_scores, evaluate
+from .ocr import read_image_for_ocr
 from .pipeline import MaskSummary, mask_file
 
 DEFAULT_OUT_DIR = Path("data") / "masked"
 DEFAULT_CACHE_DIR = Path("data") / "cache"
 TIFF_SUFFIXES = {".tif", ".tiff"}
+TRUTH_SUFFIX = ".truth.json"
 
 
 def _print_summary(summary: MaskSummary, elapsed: float) -> None:
@@ -49,10 +53,27 @@ def cmd_batch(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def _score_one(truth_path: Path, result_path: Path, image_path: Path, config: dict) -> dict:
+    truth = json.loads(truth_path.read_text(encoding="utf-8"))
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    gray = cv2.cvtColor(read_image_for_ocr(image_path), cv2.COLOR_BGR2GRAY)
+    return evaluate(truth, result, gray, config["mask"]["ink_threshold"])
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
-    truth = json.loads(args.truth.read_text(encoding="utf-8"))
-    result = json.loads(args.result.read_text(encoding="utf-8"))
-    print(json.dumps(evaluate(truth, result), ensure_ascii=False, indent=1))
+    """ファイルを3つ渡せば1枚、フォルダを3つ渡せば全枚と平均を出す。出すのは数字だけ。"""
+    config = load_config(args.config)
+    if not args.truth.is_dir():
+        print(json.dumps(_score_one(args.truth, args.result, args.image, config), ensure_ascii=False, indent=1))
+        return 0
+    rows = {}
+    for truth_path in sorted(args.truth.glob(f"*{TRUTH_SUFFIX}")):
+        name = truth_path.name[: -len(TRUTH_SUFFIX)]
+        rows[name] = _score_one(
+            truth_path, args.result / f"{name}.chiban.json", args.image / f"{name}.tif", config
+        )
+        print(name, json.dumps(rows[name], ensure_ascii=False))
+    print("平均", json.dumps(average_scores(list(rows.values())), ensure_ascii=False))
     return 0
 
 
@@ -79,6 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     score = commands.add_parser("eval", help="正解と比べて3指標を出す")
     score.add_argument("--truth", type=Path, required=True)
     score.add_argument("--result", type=Path, required=True)
+    score.add_argument("--image", type=Path, required=True, help="塗る前の図面（地番のインクの確認に使う）")
+    score.add_argument("--config", type=Path)
     score.set_defaults(func=cmd_eval)
     return parser
 
