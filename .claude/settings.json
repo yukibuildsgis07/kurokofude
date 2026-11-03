@@ -3,13 +3,16 @@
     "deny": [
       "Read(./data/raw/**)",
       "Glob(./data/raw/**)",
-      "Grep(./data/raw/**)"
+      "Grep(./data/raw/**)",
+      "Read(./data/cache/raw/**)",
+      "Glob(./data/cache/raw/**)",
+      "Grep(./data/cache/raw/**)"
     ]
   },
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Read|Glob|Grep|Bash|Edit|Write",
+        "matcher": "Read|Glob|Grep|Bash|Edit|Write|WebFetch",
         "hooks": [
           {
             "type": "command",

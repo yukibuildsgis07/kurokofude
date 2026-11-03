@@ -34,6 +34,19 @@ kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図
 
 図枠の下辺ぜんぶが表題欄の図面（河川境界確定図など）では、`--config configs/bottom_strip.yaml` を付けてください。
 
+### 確認画面
+
+```
+kurokofude review data/masked/<図面>.tif
+```
+
+ブラウザで確認画面が開きます（`127.0.0.1:8765`。この PC の中だけで動き、インターネットにはつながりません）。塗る前の図面に、塗る場所が色分けして重なります。
+
+- クリック：塗りを外す／戻す。緑の枠（地番と判定できなかった数字）はクリックで「塗る」に切り替え
+- Shift＋ドラッグ：塗りを追加（近くの地番の角度に合わせます）
+- ドラッグ：移動、ホイール：拡大・縮小
+- 「確定して塗り直す」：塗る前の図面から塗り直して `data/masked/` を上書きします。止めるときはターミナルで Ctrl+C
+
 ## 既知の制約
 
 - 1桁の地番は検出されにくく、地番と分からないまま塗られることがあります。確認画面での確認が必要です
@@ -47,7 +60,7 @@ kurokofude eval --truth data/truth/<図面>.truth.json --result data/masked/<図
 使えるツールは3つです。どれも、塗る前の図面の中身・パス、氏名の文字列を Claude に返しません。
 
 - `mask_drawing`：`data/raw/` の図面を塗り、塗った図面のパスと地番の一覧を返す
-- `open_review`：確認画面の URL を返す（確認画面は準備中）
+- `open_review`：確認画面をブラウザで開く。URL は Claude に返さず、確定済みかどうかだけを返す
 - `list_masked`：`data/masked/` の塗った図面の一覧
 
 「この図面を黒子筆で処理して」と頼むと、スキル `kurokofude` が `mask_drawing` を呼んで結果をまとめます。

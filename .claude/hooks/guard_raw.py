@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""黒子筆の関所（設計書 §4.1）。塗る前の図面へのアクセスを PreToolUse で止める。
+"""黒子筆の関所（設計書 §4.1、§3.1）。塗る前の図面と確認画面へのアクセスを PreToolUse で止める。
 
 標準ライブラリだけで動かす（フックは venv の外の Python で走ることがある）。
 判定できないときは止める側に倒す。終了コード 1 は Claude Code では「止めない」扱いなので、
@@ -18,27 +18,37 @@ from pathlib import Path
 BLOCK_EXIT_CODE = 2
 ALLOW_EXIT_CODE = 0
 MESSAGE = "このファイルは黒子筆を通す前の図面です。`mask_drawing` ツールを使ってください"
+REVIEW_MESSAGE = "確認画面は人が見るための画面です。Claude は接続できません。`open_review` ツールでブラウザを開いてください"
 DEFAULT_PROTECTED_DIRS = ("data/raw",)
 CONFIG_RELATIVE_PATH = Path("configs") / "default.yaml"
 PATH_FIELDS = ("file_path", "path", "notebook_path")
 PATTERN_FIELDS = ("pattern", "glob")
+REVIEW_FIELDS = ("command", "url")
 GLOB_CHARS = "*?["
 ALLOWED_COMMANDS_KEY = "hook_allowed_commands"
 OPEN_DIRS_KEY = "hook_open_dirs"
+REVIEW_SECTION = "review"
+REVIEW_PORT_KEY = "port"
+DEFAULT_REVIEW_PORT = "8765"
+# 確認画面に届きうるローカルのホスト名
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "127.1", "0.0.0.0", "[::1]", "::1")
+INDENT = (" ", "\t")
 # 許可リストのコマンドに含めてはいけない文字（後ろに別のコマンドをつなぐ抜け道になる）
 COMMAND_CHAIN_CHARS = ";&|<>`$()\n\r"
 # シェル上でパスの区切りになりうる文字
 TOKEN_SPLIT = re.compile(r"[\s=:;,|&()<>{}`$]+")
 
 
+def read_config_lines(project_dir: Path) -> list[str]:
+    config_path = project_dir / CONFIG_RELATIVE_PATH
+    return config_path.read_text(encoding="utf-8").splitlines() if config_path.is_file() else []
+
+
 def read_config_list(project_dir: Path, key: str) -> list[str]:
     """configs/default.yaml の最上位のリストを読む。PyYAML に依存しないよう行単位で読む。"""
-    config_path = project_dir / CONFIG_RELATIVE_PATH
-    if not config_path.is_file():
-        return []
     values = []
     in_block = False
-    for line in config_path.read_text(encoding="utf-8").splitlines():
+    for line in read_config_lines(project_dir):
         if line.startswith(f"{key}:"):
             in_block = True
         elif in_block and line.strip().startswith("- "):
@@ -46,6 +56,27 @@ def read_config_list(project_dir: Path, key: str) -> list[str]:
         elif in_block and line.strip():
             in_block = False
     return values
+
+
+def read_review_port(project_dir: Path) -> str:
+    """configs/default.yaml の review: の下の port: を読む。"""
+    in_block = False
+    for line in read_config_lines(project_dir):
+        if line.startswith(f"{REVIEW_SECTION}:"):
+            in_block = True
+        elif in_block and line[:1] in INDENT and line.strip().startswith(f"{REVIEW_PORT_KEY}:"):
+            return line.split(":", 1)[1].split("#")[0].strip() or DEFAULT_REVIEW_PORT
+        elif in_block and line.strip() and line[:1] not in INDENT:
+            break
+    return DEFAULT_REVIEW_PORT
+
+
+def hits_review_server(text: str, port: str) -> bool:
+    """確認画面（人の道具）への接続。ローカルのホスト名とポートの両方を含めば止める（§3.1）。"""
+    folded = text.casefold()
+    if not any(host in folded for host in LOCAL_HOSTS):
+        return False
+    return re.search(rf"(?<!\d){re.escape(port)}(?!\d)", text) is not None
 
 
 def load_protected_names(project_dir: Path) -> set[str]:
@@ -156,14 +187,27 @@ def should_block(payload: dict) -> bool:
     return not command_is_allowed(command, read_config_list(project_dir, ALLOWED_COMMANDS_KEY))
 
 
+def block_reason(payload: dict) -> str | None:
+    """止める理由を返す。止めないときは None。"""
+    tool_input = payload.get("tool_input") or {}
+    cwd = Path(payload.get("cwd") or os.getcwd())
+    project_dir = Path(os.environ.get("CLAUDE_PROJECT_DIR") or cwd)
+    port = read_review_port(project_dir)
+    for field in REVIEW_FIELDS:
+        value = tool_input.get(field)
+        if isinstance(value, str) and hits_review_server(value, port):
+            return REVIEW_MESSAGE
+    return MESSAGE if should_block(payload) else None
+
+
 def main() -> int:
     try:
-        blocked = should_block(json.load(sys.stdin))
+        reason = block_reason(json.load(sys.stdin))
     except Exception as exc:  # 判定不能は止める
         print(f"{MESSAGE}（関所の判定に失敗: {type(exc).__name__}）", file=sys.stderr)
         return BLOCK_EXIT_CODE
-    if blocked:
-        print(MESSAGE, file=sys.stderr)
+    if reason:
+        print(reason, file=sys.stderr)
         return BLOCK_EXIT_CODE
     return ALLOW_EXIT_CODE
 

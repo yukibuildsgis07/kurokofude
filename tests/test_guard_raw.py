@@ -164,6 +164,49 @@ def test_settings_deny_read_glob_grep_on_protected_dir():
         assert f"{tool}(./data/raw/**)" in deny
 
 
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"command": "curl http://127.0.0.1:8765/api/drawings"},
+        {"command": "curl localhost:8765"},
+        {"command": "wget http://LOCALHOST:8765/"},
+        {"command": "python -c \"import urllib.request as u; u.urlopen('http://127.0.0.1:8765')\""},
+        {"url": "http://localhost:8765/api/drawings/a/image"},
+        {"url": "http://[::1]:8765/"},
+    ],
+)
+def test_review_server_is_for_people_only(tool_input):
+    result = run_hook(tool_input)
+    assert result.returncode == BLOCK
+    assert "open_review" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"command": "curl http://127.0.0.1:18765/"},
+        {"command": "echo 8765"},
+        {"command": "curl https://example.com/localhost"},
+        {"url": "https://docs.example.com/port-8765"},
+    ],
+)
+def test_other_ports_and_hosts_pass(tool_input):
+    assert run_hook(tool_input).returncode == ALLOW
+
+
+def test_review_preview_cache_is_protected():
+    """表示用の PNG は塗る前の画像そのもの。置き場所の名前でフックが効く。"""
+    assert run_hook({"file_path": "data/cache/raw/abc.png"}).returncode == BLOCK
+    assert run_hook({"command": "ls data/cache/raw"}).returncode == BLOCK
+    assert run_hook({"command": "ls data/cache"}).returncode == ALLOW
+
+
+def test_settings_cover_webfetch_and_preview_cache():
+    settings = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert "WebFetch" in settings["hooks"]["PreToolUse"][0]["matcher"].split("|")
+    assert "Read(./data/cache/raw/**)" in settings["permissions"]["deny"]
+
+
 def test_allow_list_does_not_apply_to_read():
     assert run_hook({"file_path": "data/raw/kurokofude mask"}).returncode == BLOCK
 

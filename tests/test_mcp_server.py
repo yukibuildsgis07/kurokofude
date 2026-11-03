@@ -58,7 +58,8 @@ def test_mask_drawing_returns_only_safe_data(project):
     assert result["chiban"][0]["masked_below"] is True
     assert [u["text"] for u in result["uncertain"]] == ["273:19"]
     assert result["masks"] == {"total": 2, "by_status": {"auto": 1, "unpaired": 1}}
-    assert result["review_url"] is None
+    assert "review_url" not in result  # 確認画面の URL は返さない（§3.1）
+    assert "open_review" in result["review"]
     dumped = json.dumps(result, ensure_ascii=False)
     assert "raw" not in dumped  # 塗る前の図面のパスを返さない
     assert "quad" not in dumped  # 四角形の頂点や画像のバイト列も返さない
@@ -121,17 +122,45 @@ def test_list_masked_and_open_review(project):
             "has_world_file": True,
             "chiban": 1,
             "masks": {"total": 2, "by_status": {"auto": 1, "unpaired": 1}},
-            "reviewed": False,
+            "confirmed": False,
         }
     ]
+
+
+@pytest.fixture
+def browser(monkeypatch):
+    """確認画面は起動せず、開こうとした URL だけ記録する。"""
+    started, opened = [], []
+    monkeypatch.setattr(mcp_server.review, "ensure_running", lambda root, port, config: started.append((root, port)))
+    monkeypatch.setattr(mcp_server.review, "open_in_browser", lambda port, name: opened.append((port, name)) or True)
+    return started, opened
+
+
+def test_open_review_opens_browser_and_returns_no_url(project, browser):
+    started, opened = browser
+    mcp_server.do_mask_drawing("data/raw/zumen.tif", root=project)
     review = mcp_server.do_open_review("data/masked/zumen.tif", root=project)
-    assert review["review_url"] is None and review["reviewed"] is False
+    assert review == {"opened": True, "confirmed": False}  # URL は返さない（§3.1）
+    assert started == [(project.resolve(), 8765)]
+    assert opened == [(8765, "zumen")]
 
     result_path = project / "data" / "masked" / "zumen.chiban.json"
     result = json.loads(result_path.read_text(encoding="utf-8"))
-    result["masks"][0]["status"] = "confirmed"
+    result["confirmed"] = True
     result_path.write_text(json.dumps(result), encoding="utf-8")
-    assert mcp_server.do_open_review("data/masked/zumen.tif", root=project)["reviewed"] is True
+    assert mcp_server.do_open_review("data/masked/zumen.tif", root=project)["confirmed"] is True
+    assert mcp_server.do_list_masked(root=project)["drawings"][0]["confirmed"] is True
+
+
+def test_open_review_reports_start_failure_without_details(project, monkeypatch):
+    mcp_server.do_mask_drawing("data/raw/zumen.tif", root=project)
+
+    def busy(*_args):
+        raise RuntimeError("ポート 8765 が別のプログラムに使われています")
+
+    monkeypatch.setattr(mcp_server.review, "ensure_running", busy)
+    with pytest.raises(mcp_server.GateError, match="起動できませんでした"):
+        mcp_server.do_open_review("data/masked/zumen.tif", root=project)
 
 
 @pytest.mark.parametrize("path", ["data/raw/zumen.tif", "data/other/b.tif", "data/masked/none.tif"])

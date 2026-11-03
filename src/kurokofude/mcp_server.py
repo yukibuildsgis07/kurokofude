@@ -14,6 +14,7 @@ from mcp.server.mcpserver import MCPServer
 
 from .config import DEFAULT_CONFIG_PATH, load_config
 from .pipeline import mask_file
+from .review import app as review
 
 PROJECT_ROOT = DEFAULT_CONFIG_PATH.parents[1]
 CONFIGS_DIR_NAME = "configs"
@@ -23,11 +24,10 @@ TIFF_SUFFIXES = {".tif", ".tiff"}
 CONFIG_SUFFIX = ".yaml"
 RESULT_SUFFIX = ".chiban.json"
 WORLD_FILE_SUFFIX = ".tfw"
-REVIEWED_STATUSES = {"confirmed", "removed", "added"}
 STATUS_DETECTED = "detected"
 CENTER_DECIMALS = 1
 SCORE_DECIMALS = 3
-REVIEW_NOT_READY = "確認画面（②）はまだ実装されていません"
+REVIEW_HINT = "open_review で確認画面（人が見る画面）をブラウザで開けます。塗り漏れと塗りすぎを人が確かめてから使ってください"
 
 server = MCPServer(
     name="kurokofude",
@@ -105,7 +105,7 @@ def _mask_counts(result: dict) -> dict:
 
 
 def _is_reviewed(result: dict) -> bool:
-    return any(mask["status"] in REVIEWED_STATUSES for mask in result["masks"])
+    return bool(result.get("confirmed"))
 
 
 def _summarize(result: dict) -> dict:
@@ -149,21 +149,24 @@ def do_mask_drawing(path: str, config: str | None = None, root: Path = PROJECT_R
         "world_file": _relative(world_file, root) if world_file.is_file() else None,
         "image_size": result["image_size"],
         **_summarize(result),
-        "review_url": None,
-        "review_note": REVIEW_NOT_READY + "。塗った図面を開いて、塗り漏れと塗りすぎを目で確かめてください",
+        "review": REVIEW_HINT,
     }
 
 
 def do_open_review(masked_path: str, root: Path = PROJECT_ROOT) -> dict:
+    """確認画面は人の道具。URL は返さず、ブラウザを直接開く（§3.1）。"""
     root = root.resolve()
     masked = _check_masked_drawing(masked_path, root)
     result = _read_result(masked)
-    return {
-        "masked_path": _relative(masked, root),
-        "review_url": None,
-        "reviewed": bool(result and _is_reviewed(result)),
-        "message": REVIEW_NOT_READY,
-    }
+    if result is None:
+        raise GateError("塗った図面の結果（chiban.json）が見つかりません")
+    config = load_config()
+    port = config["review"]["port"]
+    try:
+        review.ensure_running(root, port, config)
+    except RuntimeError as exc:
+        raise GateError(f"確認画面を起動できませんでした（{exc}）") from None
+    return {"opened": review.open_in_browser(port, masked.stem), "confirmed": bool(result.get("confirmed"))}
 
 
 def do_list_masked(root: Path = PROJECT_ROOT) -> dict:
@@ -178,7 +181,7 @@ def do_list_masked(root: Path = PROJECT_ROOT) -> dict:
                 "has_world_file": tif.with_suffix(WORLD_FILE_SUFFIX).is_file(),
                 "chiban": len(result["chiban"]) if result else None,
                 "masks": _mask_counts(result) if result else None,
-                "reviewed": bool(result and _is_reviewed(result)),
+                "confirmed": bool(result and _is_reviewed(result)),
             }
         )
     return {"masked_dir": MASKED_DIR.as_posix(), "drawings": drawings}
@@ -196,7 +199,10 @@ def mask_drawing(path: str, config: str | None = None) -> dict:
 
 @server.tool()
 def open_review(masked_path: str) -> dict:
-    """塗った図面（data/masked/ の下）の確認画面の URL と、確定済みかどうかを返す。"""
+    """塗った図面（data/masked/ の下）の確認画面を、人が見るためにブラウザで開く。URL は返さない。
+
+    返すもの：opened（ブラウザを開けたか）、confirmed（人が確定済みか）
+    """
     return do_open_review(masked_path)
 
 

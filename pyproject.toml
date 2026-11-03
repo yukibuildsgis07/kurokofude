@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pillow"]
+dev = ["pytest", "pillow", "httpx"]
 
 [project.scripts]
 kurokofude = "kurokofude.cli:main"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -77,6 +78,28 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_review(args: argparse.Namespace) -> int:
+    """確認画面を前面で起動し、ブラウザを開く。Ctrl+C で止める。"""
+    from .review import app as review
+
+    root = Path.cwd().resolve()
+    masked = args.input.resolve()
+    if not masked.is_relative_to((root / DEFAULT_OUT_DIR).resolve()) or not masked.is_file():
+        print("data/masked/ の下にある塗った図面を指定してください", file=sys.stderr)
+        return 2
+    config = load_config(args.config)
+    port = args.port or config["review"]["port"]
+    if review.is_running(port):
+        review.open_in_browser(port, masked.stem)
+        print(f"確認画面はすでに動いています。ブラウザで開きました（ポート {port}）")
+        return 0
+    if not args.no_browser:
+        threading.Timer(1.0, review.open_in_browser, args=(port, masked.stem)).start()
+    print(f"確認画面を起動しました（127.0.0.1:{port}）。止めるときは Ctrl+C")
+    review.serve_forever(root, port, config)
+    return 0
+
+
 def _add_mask_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
@@ -96,6 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("input", type=Path)
     _add_mask_options(batch)
     batch.set_defaults(func=cmd_batch)
+
+    review_cmd = commands.add_parser("review", help="確認画面をブラウザで開く")
+    review_cmd.add_argument("input", type=Path)
+    review_cmd.add_argument("--config", type=Path)
+    review_cmd.add_argument("--port", type=int)
+    review_cmd.add_argument("--no-browser", action="store_true")
+    review_cmd.set_defaults(func=cmd_review)
 
     score = commands.add_parser("eval", help="正解と比べて3指標を出す")
     score.add_argument("--truth", type=Path, required=True)

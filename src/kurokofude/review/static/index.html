@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>黒子筆 確認画面</title>
+<style>
+  :root { --bar: #f3f1ec; --line: #c9c4b8; --ink: #222; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif; color: var(--ink); display: flex; height: 100vh; }
+  #side { width: 300px; background: var(--bar); border-right: 1px solid var(--line); padding: 12px; overflow-y: auto; font-size: 13px; }
+  #side h1 { font-size: 16px; margin: 0 0 8px; }
+  #side h2 { font-size: 13px; margin: 16px 0 6px; }
+  #main { flex: 1; position: relative; overflow: hidden; background: #888; }
+  canvas { position: absolute; inset: 0; cursor: grab; }
+  select, button { font: inherit; width: 100%; margin: 4px 0; padding: 6px; }
+  button.primary { background: #1d4f91; color: #fff; border: none; border-radius: 4px; }
+  button.primary:disabled { background: #8aa1c0; }
+  .legend { display: grid; grid-template-columns: 16px 1fr auto; gap: 4px 8px; align-items: center; }
+  .swatch { width: 14px; height: 14px; border: 1px solid #555; }
+  #status { margin-top: 8px; min-height: 2em; }
+  .confirmed { color: #1b7a2d; font-weight: bold; }
+  .help { color: #555; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>黒子筆 確認画面</h1>
+  <select id="drawing"></select>
+  <div id="state"></div>
+  <h2>塗りの種類（クリックで外す／戻す）</h2>
+  <div class="legend" id="legend"></div>
+  <h2>操作</h2>
+  <div class="help">
+    クリック：塗りを外す／戻す。緑の枠（数字の枠）は「塗る」に切り替え<br>
+    Shift＋ドラッグ：塗りを追加（近くの地番の角度に合わせる）<br>
+    ドラッグ：移動　ホイール：拡大・縮小<br>
+    「全体を表示」で元の大きさに戻る
+  </div>
+  <button id="fit">全体を表示</button>
+  <button id="save">保存（まだ塗り直さない）</button>
+  <button id="confirm" class="primary">確定して塗り直す</button>
+  <div id="status"></div>
+</div>
+<div id="main"><canvas id="view"></canvas></div>
+<script>
+"use strict";
+const STYLES = {
+  auto:           { label: "地番の下の氏名", fill: "rgba(220,40,40,0.45)",  line: "#b01818" },
+  unpaired:       { label: "地番とペアでない文字", fill: "rgba(240,140,0,0.45)", line: "#b86200" },
+  in_title_block: { label: "表題欄の文字", fill: "rgba(140,60,200,0.45)", line: "#6a2ca0" },
+  mixed_masked:   { label: "氏名と地番が1つの枠（全体を塗った）", fill: "rgba(220,0,160,0.45)", line: "#a0007a" },
+  split:          { label: "氏名と地番の枠を分けた氏名側", fill: "rgba(0,150,150,0.45)", line: "#006e6e" },
+  added:          { label: "人が追加した塗り", fill: "rgba(30,90,220,0.45)", line: "#123f9e" },
+  uncertain_chiban: { label: "数字の枠（塗っていない）", fill: null, line: "#1b8a2d" },
+  chiban:         { label: "地番（参考）", fill: null, line: "rgba(0,0,0,0.35)" },
+};
+const canvas = document.getElementById("view");
+const ctx = canvas.getContext("2d");
+const statusBox = document.getElementById("status");
+let image = null, data = null, name = null;
+let scale = 1, offsetX = 0, offsetY = 0;
+let drag = null, dirty = false;
+
+function originOf(m) { return m.origin || (m.status === "confirmed" ? "auto" : m.status); }
+function styleOf(m) { return STYLES[originOf(m) === "uncertain_chiban" ? "added" : originOf(m)] || STYLES.added; }
+function toScreen(p) { return [p[0] * scale + offsetX, p[1] * scale + offsetY]; }
+function toImage(x, y) { return [(x - offsetX) / scale, (y - offsetY) / scale]; }
+
+function resize() {
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = canvas.parentElement.clientHeight;
+  draw();
+}
+function fit() {
+  if (!image) return;
+  scale = Math.min(canvas.width / image.width, canvas.height / image.height);
+  offsetX = (canvas.width - image.width * scale) / 2;
+  offsetY = (canvas.height - image.height * scale) / 2;
+  draw();
+}
+function path(quad) {
+  ctx.beginPath();
+  quad.forEach((p, i) => { const [x, y] = toScreen(p); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.closePath();
+}
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!image || !data) return;
+  ctx.imageSmoothingEnabled = scale < 1;
+  ctx.drawImage(image, offsetX, offsetY, image.width * scale, image.height * scale);
+  ctx.lineWidth = 1;
+  for (const c of data.chiban) { path(c.quad); ctx.strokeStyle = STYLES.chiban.line; ctx.stroke(); }
+  const chosen = new Set(data.masks.filter(m => m.uncertain_index !== undefined && m.status !== "removed").map(m => m.uncertain_index));
+  (data.uncertain || []).forEach((u, i) => {
+    if (chosen.has(i)) return;
+    path(u.quad); ctx.setLineDash([]); ctx.lineWidth = 2; ctx.strokeStyle = STYLES.uncertain_chiban.line; ctx.stroke();
+  });
+  for (const m of data.masks) {
+    const s = styleOf(m);
+    path(m.quad);
+    if (m.status === "removed") {
+      ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.strokeStyle = s.line; ctx.stroke(); ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = s.fill; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = s.line; ctx.stroke();
+    }
+  }
+  if (drag && drag.adding && drag.preview) { path(drag.preview); ctx.fillStyle = STYLES.added.fill; ctx.fill(); }
+  renderLegend();
+}
+function renderLegend() {
+  const counts = {};
+  for (const m of data.masks) {
+    const key = originOf(m) === "uncertain_chiban" ? "added" : originOf(m);
+    counts[key] = counts[key] || { on: 0, off: 0 };
+    m.status === "removed" ? counts[key].off++ : counts[key].on++;
+  }
+  const legend = document.getElementById("legend");
+  legend.innerHTML = "";
+  for (const [key, s] of Object.entries(STYLES)) {
+    const sw = document.createElement("div"); sw.className = "swatch";
+    sw.style.background = s.fill || "transparent"; sw.style.borderColor = s.line;
+    const label = document.createElement("div"); label.textContent = s.label;
+    const n = document.createElement("div");
+    if (key === "uncertain_chiban") n.textContent = (data.uncertain || []).length;
+    else if (key === "chiban") n.textContent = data.chiban.length;
+    else n.textContent = counts[key] ? `${counts[key].on}` + (counts[key].off ? `（外した ${counts[key].off}）` : "") : "0";
+    legend.append(sw, label, n);
+  }
+  const state = document.getElementById("state");
+  state.innerHTML = data.confirmed ? `<span class="confirmed">確定済み（${data.confirmed_at}）</span>` : (dirty ? "未保存の変更があります" : "未確定");
+}
+function inside(quad, p) {
+  let hit = false;
+  for (let i = 0, j = quad.length - 1; i < quad.length; j = i++) {
+    const [xi, yi] = quad[i], [xj, yj] = quad[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < (xj - xi) * (p[1] - yi) / (yj - yi) + xi) hit = !hit;
+  }
+  return hit;
+}
+function nearestAngle(p) {
+  let best = null, bestDist = Infinity;
+  for (const c of data.chiban) {
+    const cx = c.quad.reduce((a, q) => a + q[0], 0) / c.quad.length;
+    const cy = c.quad.reduce((a, q) => a + q[1], 0) / c.quad.length;
+    const d = Math.hypot(cx - p[0], cy - p[1]);
+    if (d < bestDist) { bestDist = d; best = c; }
+  }
+  if (!best) return 0;
+  const [a, b] = best.quad;
+  return Math.atan2(b[1] - a[1], b[0] - a[0]);
+}
+function rectFrom(a, b, angle) {
+  const u = [Math.cos(angle), Math.sin(angle)], v = [-Math.sin(angle), Math.cos(angle)];
+  const d = [b[0] - a[0], b[1] - a[1]];
+  const du = d[0] * u[0] + d[1] * u[1], dv = d[0] * v[0] + d[1] * v[1];
+  return [a, [a[0] + u[0] * du, a[1] + u[1] * du], [a[0] + u[0] * du + v[0] * dv, a[1] + u[1] * du + v[1] * dv], [a[0] + v[0] * dv, a[1] + v[1] * dv]];
+}
+function click(p) {
+  for (let i = data.masks.length - 1; i >= 0; i--) {
+    const m = data.masks[i];
+    if (!inside(m.quad, p)) continue;
+    if (m.uncertain_index !== undefined || (m.status === "added" && originOf(m) === "added")) {
+      data.masks.splice(i, 1);
+    } else {
+      m.status = m.status === "removed" ? originOf(m) : "removed";
+    }
+    changed(); return;
+  }
+  const chosen = new Set(data.masks.map(m => m.uncertain_index));
+  for (let i = 0; i < (data.uncertain || []).length; i++) {
+    const u = data.uncertain[i];
+    if (!chosen.has(i) && inside(u.quad, p)) {
+      data.masks.push({ quad: u.quad, chiban: null, status: "added", origin: "uncertain_chiban", uncertain_index: i });
+      changed(); return;
+    }
+  }
+}
+function changed() { dirty = true; data.confirmed = false; draw(); }
+
+canvas.addEventListener("mousedown", e => {
+  drag = { x: e.offsetX, y: e.offsetY, ox: offsetX, oy: offsetY, adding: e.shiftKey, moved: false };
+  if (drag.adding) { drag.start = toImage(e.offsetX, e.offsetY); drag.angle = nearestAngle(drag.start); }
+});
+canvas.addEventListener("mousemove", e => {
+  if (!drag) return;
+  if (Math.hypot(e.offsetX - drag.x, e.offsetY - drag.y) > 3) drag.moved = true;
+  if (drag.adding) drag.preview = rectFrom(drag.start, toImage(e.offsetX, e.offsetY), drag.angle);
+  else { offsetX = drag.ox + e.offsetX - drag.x; offsetY = drag.oy + e.offsetY - drag.y; }
+  draw();
+});
+window.addEventListener("mouseup", e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.moved && e.target === canvas) click(toImage(e.offsetX, e.offsetY));
+  else if (d.adding && d.preview) {
+    data.masks.push({ quad: d.preview, chiban: null, status: "added", origin: "added" });
+    changed();
+  } else draw();
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  const [ix, iy] = toImage(e.offsetX, e.offsetY);
+  scale *= factor;
+  offsetX = e.offsetX - ix * scale; offsetY = e.offsetY - iy * scale;
+  draw();
+}, { passive: false });
+
+async function api(method, url, body) {
+  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+  return res.json();
+}
+async function save() {
+  const masks = data.masks.map(m => ({ quad: m.quad, status: m.status, origin: originOf(m), chiban: m.chiban ?? null, uncertain_index: m.uncertain_index ?? null }));
+  data = await api("PUT", `/api/drawings/${encodeURIComponent(name)}`, { masks });
+  dirty = false; draw();
+}
+document.getElementById("save").onclick = async () => {
+  try { await save(); statusBox.textContent = "保存しました。図面はまだ塗り直していません"; } catch (e) { statusBox.textContent = "保存に失敗：" + e.message; }
+};
+document.getElementById("confirm").onclick = async () => {
+  const button = document.getElementById("confirm");
+  button.disabled = true; statusBox.textContent = "塗り直しています…";
+  try {
+    await save();
+    data = await api("POST", `/api/drawings/${encodeURIComponent(name)}/confirm`);
+    statusBox.textContent = "確定しました。data/masked/ の図面を塗り直しました"; draw();
+  } catch (e) { statusBox.textContent = "確定に失敗：" + e.message; }
+  button.disabled = false;
+};
+document.getElementById("fit").onclick = fit;
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+async function load(target) {
+  if (dirty && !confirm("保存していない変更があります。切り替えますか？")) { document.getElementById("drawing").value = name; return; }
+  name = target; dirty = false; statusBox.textContent = "読み込んでいます…";
+  data = await api("GET", `/api/drawings/${encodeURIComponent(name)}`);
+  history.replaceState(null, "", `?drawing=${encodeURIComponent(name)}`);
+  image = new Image();
+  image.onload = () => { statusBox.textContent = ""; fit(); };
+  image.onerror = () => { statusBox.textContent = "画像を読み込めませんでした"; };
+  image.src = `/api/drawings/${encodeURIComponent(name)}/image`;
+}
+async function start() {
+  resize();
+  const list = (await api("GET", "/api/drawings")).drawings;
+  const select = document.getElementById("drawing");
+  for (const d of list) {
+    const o = document.createElement("option"); o.value = d.name; o.textContent = d.name + (d.confirmed ? "（確定済み）" : ""); select.append(o);
+  }
+  select.onchange = () => load(select.value);
+  const wanted = new URLSearchParams(location.search).get("drawing");
+  const first = list.some(d => d.name === wanted) ? wanted : (list[0] && list[0].name);
+  if (first) { select.value = first; await load(first); } else statusBox.textContent = "data/masked/ に図面がありません";
+}
+window.addEventListener("resize", resize);
+start();
+</script>
+</body>
+</html>

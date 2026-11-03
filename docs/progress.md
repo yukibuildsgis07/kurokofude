@@ -4,6 +4,9 @@
 2026-11-04 できた：③ MCP サーバー（mask_drawing / open_review / list_masked、stdio）、.mcp.json（uv run --no-sync で .venv の python を起動）、スキル kurokofude の骨格。Claude Code から mask_drawing を呼び、塗った図面と地番一覧だけが返ることを確認。pytest 192 件成功。
 2026-11-04 未了：確認画面の URL（②）。open_review は「未実装」を返す。デモでフックの場面が出なかった（下の記録、questions.md Q12）。Windows CI と make_dummy の2点は未着手。
 2026-11-04 次：②確認画面（指示待ち）。
+2026-11-04 できた：②確認画面（FastAPI＋HTML 1枚、外部ライブラリなし。塗りの色分け、クリックで外す、Shift＋ドラッグで追加、数字の枠を「塗る」に、確定で塗り直し）、`kurokofude review`、open_review はブラウザを開いて URL を返さない、フックで確認画面のポートへの接続（Bash、WebFetch）を止める。API は TestClient で確認、実データでも応答（表示用 PNG 15MB、初回 0.3 秒）。pytest 222 件成功。
+2026-11-04 未了：画面を実際にブラウザで操作した確認（Yuki。夜中にブラウザを開かないよう私は起動していない）、MCP から open_review を呼んだ確認、Windows での確認。
+2026-11-04 Yuki へ：`kurokofude review data/masked/dummy_001.tif` で開き、クリック・Shift＋ドラッグ・確定を試してほしい。気になる操作感は questions.md へ。
 
 ### 2026-11-04 MCP の動作確認（デモの流れの下書き）
 
