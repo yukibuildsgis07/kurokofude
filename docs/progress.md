@@ -58,3 +58,6 @@
 2026-11-05 デモの準備：場面1・2は未確定の dummy_003 を使う（確定済みの dummy_001、dummy_002 に mask_drawing を呼ぶと確定が消えるため）。場面3の直前に docs/demo_prompt.txt のコマンドで .tfw をずらす。
 2026-11-05 未了：対話の Claude Code での3場面の通し確認（ヘッドレスでは open_review を許可していない）、README の Mermaid の表示確認（GitHub で見る）。本線のコードは変更なし。
 
+2026-11-05 できた：デモ用の比較画像 tools/georef/compare.py（照合前 43.2 m／照合後 1.4 m の PNG 2枚、横並びの docs/georef_before_after.png、1秒ずつの GIF）。README の「できること」に貼った。正解の .tfw で重ねると線が全面で一致することを見て、描き方と向きを確かめた。
+2026-11-05 確認：照合後は筆界線と図面の線がほぼ重なるが、拡大すると同じ向きに 1〜2 m ほど離れている（ずれ 1.4 m のとおり）。本線のコードは変更なし。
+2026-11-05 未了：対話の Claude Code での3場面の通し確認、README の Mermaid の表示確認。

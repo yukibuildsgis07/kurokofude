@@ -12,3 +12,18 @@ irls:                        # 残差で重みを決める反復（Q14）。meth
   min_scale_m: 0.5           # 残差の尺度の下限（m）。ほぼ一致するときに重みが暴れないように
   iterations: 20
   tolerance: 0.001           # 重みの変化がこれ未満なら止める
+compare:                     # デモ用の比較画像（compare.py）
+  width_px: 1000             # 1枚の幅
+  supersample: 3             # 大きく描いてから縮める倍率
+  margin_m: 8                # 図面が覆う範囲の外に足す余白（m）
+  drawing_alpha: 0.55        # 塗った図面の不透明度
+  background_rgb: [255, 255, 255]
+  parcel_color_rgb: [20, 90, 230]   # 公図の筆界線
+  parcel_width_px: 1
+  line_shift_bits: 4
+  label_font_px: 34
+  label_padding_px: 12
+  label_box_rgb: [255, 255, 255]
+  label_text_rgb: [20, 20, 20]
+  gap_px: 16
+  gif_frame_ms: 1000

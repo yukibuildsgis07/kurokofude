@@ -187,3 +187,19 @@ def test_frame_quad_is_used_after_the_image_clip():
     # 必ず一致するわけではない。実データでの収束は accuracy_log の「照合」）
     assert with_frame["residual_rms_m"] < with_frame["iterations"][0]["residual_rms_m"] / 5
     assert image_only["used_frame"] is False
+
+
+def test_compare_canvas_puts_north_up_and_follows_world_file():
+    """比較画像のキャンバスは北が上。図面の画素は .tfw のとおりの場所に写る。"""
+    import compare
+
+    tfw = np.array(truth_tfw())
+    extent = compare.canvas_extent([tfw], (1000, 800), 8.0)
+    west, south, east, north = extent
+    assert west < ORIGIN[0] < east and south < ORIGIN[1] < north
+    upper, lower = compare.world_to_canvas(np.array([[ORIGIN[0], 100.0 + ORIGIN[1]], [ORIGIN[0], ORIGIN[1]]]), extent, 0.5)
+    assert upper[1] < lower[1]  # 北が増えると、キャンバスの行は減る
+    matrix = compare.pixel_to_canvas_matrix(tfw, extent, 0.5)
+    pixel = np.array([[300.0, 200.0]])
+    expected = compare.world_to_canvas(compare.to_world(tfw, pixel), extent, 0.5)[0]
+    assert matrix @ np.array([300.0, 200.0, 1.0]) == pytest.approx(expected)
