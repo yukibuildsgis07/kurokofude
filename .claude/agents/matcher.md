@@ -21,12 +21,13 @@ tools: Bash, Read
 2. 実行する：`python tools/georef/georef.py data/masked/<図面>.chiban.json data/ref/<図面>.geojson`
    - 図郭線（画像上の四角形）があれば `--frame <JSON>` を付ける。精度が上がる。ダミー図面では `data/truth/<図面>.truth.json` に `frame_quad` として入っている（実物の図面では、設定か検出が必要。まだない）
    - `data/masked/<図面>.tfw` が上書きされ、詳細は `data/masked/<図面>.georef.json` に出る
-3. 次の形で報告する
+3. 次の項目だけを、箇条書き8行以内で報告する。見出しや前置きは書かない
    - 結果：`status`、使ったペア数（`pairs_used`／`pairs_found`）、残差の RMS と最大（m）、画素の大きさ（m）、回転（度）
    - 向きの確認：`mirrored_pairs_used` が `pairs_used` よりずっと少なければ、画像の上下の向きは正しい。同じくらいなら向きを取り違えている恐れがあると書く
    - 読み替え：`rereadings`（ハイフンが落ちた地番を、公図にある地番に読み替えたもの）があれば全部挙げる
-   - 外したペア：`excluded` と、`unmatched`（公図にない、同じ地番が複数）
-   - 残差が大きい上位5件（`georef.json` の `residuals`）
+   - 外したペア：`excluded` と、`unmatched`（公図にない、同じ地番が複数）の件数
+   - 残差が最大の地番を1件（全件は `georef.json` の `residuals` にあると添える）
+   - 図郭線をダミーの正解データから取ったときは、その旨
 4. 残差の RMS が 10 m を超える、または使ったペアが5組未満なら「位置合わせは不確か。人が確かめてください」と添える
 
 ## 知っておくこと

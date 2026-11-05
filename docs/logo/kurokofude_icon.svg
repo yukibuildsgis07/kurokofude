@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#f4f1e6"/>
+  <!-- 筆界の線（アイコン用に濃く太く） -->
+  <g stroke="#6b6558" stroke-width="9" fill="none" stroke-linejoin="round">
+    <path d="M60 150 L300 120 L430 215 L385 440 L70 418 Z"/>
+    <path d="M150 135 L210 428"/>
+    <path d="M66 290 L408 318"/>
+  </g>
+  <!-- 地番 -->
+  <text x="268" y="236" font-family="Noto Sans CJK JP, Noto Sans CJK SC, sans-serif" font-weight="700" font-size="52" fill="#3a3630" text-anchor="middle" transform="rotate(-8 268 236)">273-9</text>
+  <!-- 塗り -->
+  <rect x="158" y="256" width="220" height="62" fill="#1c1c1c" transform="rotate(-8 268 287)"/>
+  <!-- 筆（鉄紺） -->
+  <g transform="translate(372 240) rotate(-38)">
+    <rect x="-10" y="-190" width="20" height="186" rx="8" fill="#2b3a5c"/>
+    <path d="M-12 0 Q0 40 12 0 Z" fill="#1c1c1c"/>
+  </g>
+</svg>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480">
+  <rect width="1200" height="480" fill="#f4f1e6"/>
+  <!-- 図面の線（薄く） -->
+  <g stroke="#6b6558" stroke-width="4" fill="none">
+    <path d="M40 120 L300 95 L420 180 L380 400 L60 380 Z"/>
+    <path d="M300 95 L330 60"/>
+    <path d="M420 180 L470 150"/>
+    <path d="M140 110 L200 390"/>
+    <path d="M60 250 L410 275"/>
+  </g>
+  <!-- 地番 -->
+  <text x="225" y="215" font-family="Noto Sans CJK JP, Noto Sans CJK SC, sans-serif" font-size="30" fill="#5a5548" text-anchor="middle" transform="rotate(-8 225 215)">273-9</text>
+  <!-- 塗り：地番の真下、同じ角度 -->
+  <rect x="150" y="228" width="150" height="40" fill="#1c1c1c" transform="rotate(-8 225 248)"/>
+  <!-- 筆（鉄紺） -->
+  <g transform="translate(300 232) rotate(-38)">
+    <rect x="-6" y="-120" width="12" height="118" rx="5" fill="#2b3a5c"/>
+    <path d="M-7 0 Q0 26 7 0 Z" fill="#1c1c1c"/>
+  </g>
+  <!-- 名前 -->
+  <text x="560" y="250" font-family="Noto Serif CJK JP, Noto Serif CJK SC, serif" font-weight="700" font-size="150" fill="#1c1c1c">黒子筆</text>
+  <text x="566" y="318" font-family="Noto Sans CJK JP, Noto Sans CJK SC, sans-serif" font-size="38" fill="#2b3a5c" letter-spacing="8">KUROKOFUDE</text>
+  <text x="566" y="372" font-family="Noto Sans CJK JP, Noto Sans CJK SC, sans-serif" font-size="30" fill="#5a5548">AIに図面を渡す前の関所</text>
+</svg>

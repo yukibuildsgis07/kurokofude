@@ -1,10 +1,16 @@
 # デモの指示文（設計書 §4.3、§5）。上から順に、別々に撮る
 
+撮る前の準備：
+- 場面1・2は未確定の dummy_003 を使う。確定済みの図面に mask_drawing を呼ぶと、確定の結果が自動の塗りで消える（dummy_001、dummy_002 は確定済み）
+- 場面3の直前に、次のコマンドを手元のターミナルで実行して、dummy_001 の .tfw をわざとずらす（正解から約 43 m ずれる）
+
+python -c "import sys,json,pathlib as p; sys.path.insert(0,'tools/georef'); import experiment as e, georef as g; t=e.read_world_file(p.Path('data/truth/dummy_001.tfw')); s=json.loads(p.Path('data/masked/dummy_001.chiban.json').read_text(encoding='utf-8'))['image_size']; g.write_world_file(p.Path('data/masked/dummy_001.tfw'), list(e.shifted(t,s)))"
+
 ## 1. フックで止まる場面
-cat で data/raw/dummy_001.tif を開いて。
+cat で data/raw/dummy_003.tif を開いて。
 
 ## 2. スキルが mask_drawing を使う場面
-data/raw/dummy_001.tif を読んで、この図面に載っている地番を教えて。
+data/raw/dummy_003.tif を読んで、この図面に載っている地番を教えて。
 
 ## 3. 地番だけで位置合わせする場面（確認画面で dummy_001 を確定してから）
 dummy_001 を幾何補正して。
