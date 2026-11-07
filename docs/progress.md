@@ -69,3 +69,6 @@
 2026-11-07 未了：docs/submission.md と docs/script_v2.md §6 の出典（Yuki が直す）、デモ動画の URL。
 2026-11-07 できた：make_dummy に --only を追加（1枚だけ書き出す。ほかは同じ順番で飛ばすので同じ図面が再現される）。dummy_002 を作業用フォルダで作り直すと、正解データ・.tfw・公図・画像の SHA-256 が今のものと一致した。
 
+2026-11-07 できた：README にデモ動画の URL を入れ、docs/submission.md を v3 の内容に差し替えた。
+2026-11-07 できた：開発の過程の記録として submission_v2／v3、script_v2、fable_review_1106、submission_form をコミットした。
+2026-11-07 未了：なし（提出の作業は Yuki が行う）。
