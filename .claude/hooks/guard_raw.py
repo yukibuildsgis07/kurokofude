@@ -19,10 +19,12 @@ BLOCK_EXIT_CODE = 2
 ALLOW_EXIT_CODE = 0
 MESSAGE = "このファイルは黒子筆を通す前の図面です。`mask_drawing` ツールを使ってください"
 REVIEW_MESSAGE = "確認画面は人が見るための画面です。Claude は接続できません。`open_review` ツールでブラウザを開いてください"
+FORCE_MESSAGE = "確定の結果を消す上書きは、人がターミナルで行います。Claude は実行できません"
 RULE_PATH = "保護フォルダへのパス"
 RULE_GLOB = "保護フォルダを指すグロブ"
 RULE_PARENT = "保護フォルダの親（data）を、開いてよいフォルダ以外で指すパス"
 RULE_REVIEW = "確認画面への接続"
+RULE_FORCE = "確定の上書きは人だけ"
 RULE_ERROR = "関所の判定に失敗"
 DEFAULT_PROTECTED_DIRS = ("data/raw",)
 CONFIG_RELATIVE_PATH = Path("configs") / "default.yaml"
@@ -41,6 +43,9 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "127.1", "0.0.0.0", "[::1]", "::1")
 INDENT = (" ", "\t")
 # 許可リストのコマンドに含めてはいけない文字（後ろに別のコマンドをつなぐ抜け道になる）
 COMMAND_CHAIN_CHARS = ";&|<>`$()\n\r"
+# 確定済みの図面を上書きするコマンド（§19）。argparse は --fo のような省略も受け付ける
+MASK_COMMAND = re.compile(r"kurokofude(?:\.cli)?\s+(?:mask|batch)\b")
+FORCE_OPTION = re.compile(r"(?<![\w-])--f(?:o(?:r(?:ce?)?)?)?(?=[\s=]|$)")
 # シェル上でパスの区切りになりうる文字
 TOKEN_SPLIT = re.compile(r"[\s=:;,|&()<>{}`$]+")
 
@@ -83,6 +88,12 @@ def hits_review_server(text: str, port: str) -> bool:
     if not any(host in folded for host in LOCAL_HOSTS):
         return False
     return re.search(rf"(?<!\d){re.escape(port)}(?!\d)", text) is not None
+
+
+def hits_forced_overwrite(command: str) -> bool:
+    """人の確定を消す上書き。許可リストのコマンドでも止める（§19）。"""
+    unquoted = command.replace('"', "").replace("'", "")
+    return MASK_COMMAND.search(unquoted) is not None and FORCE_OPTION.search(unquoted) is not None
 
 
 def load_protected_names(project_dir: Path) -> set[str]:
@@ -234,6 +245,9 @@ def block_reason(payload: dict) -> str | None:
         value = tool_input.get(field)
         if isinstance(value, str) and hits_review_server(value, port):
             return f"{REVIEW_MESSAGE}\n止めた規則：{RULE_REVIEW}"
+    command = tool_input.get("command")
+    if isinstance(command, str) and hits_forced_overwrite(command):
+        return f"{FORCE_MESSAGE}\n止めた規則：{RULE_FORCE}"
     rule = protected_rule(payload)
     return f"{MESSAGE}\n止めた規則：{rule}" if rule else None
 

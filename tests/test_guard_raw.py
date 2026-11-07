@@ -241,6 +241,43 @@ def test_block_message_names_the_rule(tool_input, rule):
     assert f"止めた規則：{rule}" in result.stderr
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kurokofude mask data/raw/a.tif --force",
+        "kurokofude mask --force data/raw/a.tif",
+        "kurokofude batch data/raw --force",
+        "kurokofude mask tests/fixtures/a.tif --force",
+        "kurokofude mask data/raw/a.tif --fo",
+        "kurokofude mask data/raw/a.tif --f",
+        "kurokofude mask data/raw/a.tif '--force'",
+        ".venv/bin/kurokofude mask tests/fixtures/a.tif --force",
+        "python -m kurokofude.cli batch tests/fixtures --force",
+        "cd tests; kurokofude mask fixtures/a.tif --force",
+    ],
+)
+def test_forced_overwrite_is_for_people_only(command):
+    """確定の上書きは、許可リストのコマンドでも止める（§19）。"""
+    result = run_hook({"command": command})
+    assert result.returncode == BLOCK
+    assert "止めた規則：確定の上書きは人だけ" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "kurokofude mask data/raw/a.tif",
+        "kurokofude batch data/raw --out data/masked",
+        "kurokofude review data/masked/a.tif",
+        "git push --force",
+        "kurokofude eval --truth data/truth/a.json --result data/masked/a.json --image data/raw/a.tif",
+        "kurokofude mask data/raw/a.tif --config configs/force.yaml",
+    ],
+)
+def test_commands_without_forced_overwrite_still_pass(command):
+    assert run_hook({"command": command}).returncode == ALLOW
+
+
 def test_allow_list_does_not_apply_to_read():
     assert run_hook({"file_path": "data/raw/kurokofude mask"}).returncode == BLOCK
 

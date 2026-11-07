@@ -471,4 +471,5 @@ Yuki の指摘：図郭番号と作成日は実務で必要で、個人情報で
 - `kurokofude mask` と `kurokofude batch` は、`chiban.json` が `confirmed: true` の図面には `--force` なしでは書かない。`mask` は終了コード 1 で止まる。`batch` はその図面を飛ばして続け、飛ばしただけなら終了コード 0
 - `mask_drawing` も確定済みの図面は拒否する。force の引数は持たせない。人の確定を消すかどうかは人が決めることなので、上書きは人が CLI の `--force` で行う
 - 判定は OCR の前に行う
+- 2026-11-07 追記（Fable 判断）：フックは、`kurokofude mask`／`batch` に `--force` が含まれるコマンドを止める（止めた規則：確定の上書きは人だけ）。保護フォルダの外の図面でも止める。argparse が受け付ける省略（`--fo` など）も止める。人は `!` や手元のターミナルで実行する
 

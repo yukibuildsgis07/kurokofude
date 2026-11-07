@@ -160,7 +160,7 @@ kurokofude review data/masked/<図面>.tif   # 確認画面を開く
 kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前.tif>   # 採点する
 ```
 
-確認画面で確定した図面は、`mask` でも `batch` でも上書きしません。確定の結果を消して塗り直すときだけ、`--force` を付けます。MCP ツールの `mask_drawing` には、この上書きの手段はありません。
+確認画面で確定した図面は、`mask` でも `batch` でも上書きしません。確定の結果を消して塗り直すときだけ、`--force` を付けます。`--force` は人だけが使えます。MCP ツールの `mask_drawing` には上書きの手段がなく、Claude が Bash で実行してもフックが止めます。
 
 ### 確認画面
 
@@ -239,9 +239,11 @@ Yuki が方針を決め、Fable が設計し、Opus が実装しました。Opus
 
 ## 出典
 
-図面は、法務省 登記所備付地図データ（[G空間情報センター](https://front.geospatial.jp/)）を加工して作成しました。データの案内は[法務省のページ](https://www.moj.go.jp/MINJI/minji05_00494.html)にあります。
+「登記所備付地図データ 磐田市」（法務省）（https://www.geospatial.jp/ckan/dataset/houmusyouchizu-2026-1-1064）（2026年11月1日に利用）を加工して作成
 
 [登記所備付地図データ利用規約](https://www.geospatial.jp/ckan/dataset/fc3b0593-ce9e-40d1-aa33-94382d5f0da1/resource/47871bf1-4c85-48f7-a8fe-b27c6643c1c5/download/license.pdf)に沿って加工し、再配布しています。加工は作者が行ったもので、国や法務省が作成したものではありません。
+
+本作品は特定の自治体の業務とは関係がなく、データは公共座標系で公開されている地域から選んだものです。
 
 **図面に描かれた氏名は、すべて架空のものです。**
 

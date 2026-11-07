@@ -64,4 +64,7 @@
 2026-11-07 できた：Fable の赤入れ（docs/fable_review_1106.md）の README の項目（開発の記録、デモ動画の行、例文、出典、利用上の注意、活用業務）。mask と batch は確定済みの図面を --force なしでは上書きしない。mask_drawing は確定済みを拒否し、force の引数を持たない。pytest 268 件成功。
 2026-11-07 未了：デモ動画の URL を README に入れる。出典の書き方は Yuki の判断待ち（questions.md Q16）。
 2026-11-07 確認：docs/submission*.md と docs/script_v2.md は触っていない。
+2026-11-07 できた：README の出典を利用規約の記載例に合わせた（市の名前、データページの URL、利用した日）。CLAUDE.md に出典は対象外と追記。フックは確定の上書き（--force）を止める。
+2026-11-07 確認：利用した日 2026年11月1日は、元データのダウンロードの記録（Safari の隔離属性の時刻）から取った。
+2026-11-07 未了：docs/submission.md と docs/script_v2.md §6 の出典（Yuki が直す）、デモ動画の URL。
 
