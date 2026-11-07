@@ -2,6 +2,8 @@
   <img src="docs/logo/kurokofude_logo_dark.png" alt="黒子筆 KUROKOFUDE AIに図面を渡す前の関所" width="600">
 </p>
 
+<p align="center">デモ動画：（11/7 に URL を入れる）</p>
+
 [![test](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml)
 [![windows-smoke](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml)
 
@@ -13,7 +15,7 @@
 
 ## 誰の、どんな課題か
 
-道路台帳の現況平面図や河川台帳の境界確定図には、**地番の下に地権者の氏名**が書かれています。図面の幾何補正などを AI に任せたくても、個人情報が入った画像をそのまま渡すのは不安です。
+河川管理の境界確定と、道路台帳の区域線図作成では、スキャンした台帳図面の位置合わせが要ります。その図面には、**地番の下に地権者の氏名**が書かれています。位置合わせを AI に任せたくても、個人情報が入った画像をそのまま渡すのは不安です。
 
 そこで測量会社の現場では、ペイントで氏名を1つずつ塗っています。シンプルな図面でも **1枚2分**。台帳単位では膨大な量になります。ペイントは水平な四角しか描けないので、**斜めの文字を塗ると周りの線まで消えて**しまい、幾何補正の精度にも響きます。
 
@@ -158,6 +160,8 @@ kurokofude review data/masked/<図面>.tif   # 確認画面を開く
 kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前.tif>   # 採点する
 ```
 
+確認画面で確定した図面は、`mask` でも `batch` でも上書きしません。確定の結果を消して塗り直すときだけ、`--force` を付けます。MCP ツールの `mask_drawing` には、この上書きの手段はありません。
+
 ### 確認画面
 
 ブラウザで開きます（`127.0.0.1:8765`。この PC の中だけで動き、インターネットにはつながりません）。塗る前の図面に、塗る場所が種類ごとの色で重なります。隅に倍率とスケールバーが出ます。
@@ -171,8 +175,11 @@ kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前
 
 リポジトリのルートに `.mcp.json` があります。このフォルダで Claude Code を起動すると、MCP サーバー `kurokofude` の承認を求められるので承認してください。
 
-- 「`data/raw/図面.tif` の地番を教えて」：スキル `kurokofude` が `mask_drawing` を呼び、結果をまとめて確認画面を開きます
-- 「図面を幾何補正して」（実験）：確定済みなら、サブエージェント `matcher` が公図（`data/ref/<図面>.geojson`）と照合して `.tfw` を作ります。未確定なら、人の確定を待ちます
+例文はデモと同じです（図面名は手元のものに読み替えてください）。
+
+- 「cat で data/raw/dummy_003.tif を開いて。」：フックで止まり、どの規則で止めたかが出ます
+- 「data/raw/dummy_003.tif を読んで、この図面に載っている地番を教えて。」：スキル `kurokofude` が `mask_drawing` を呼び、結果をまとめて確認画面を開きます
+- 「dummy_001 を幾何補正して。」（実験）：確定済みなら、サブエージェント `matcher` が公図（`data/ref/<図面>.geojson`）と照合して `.tfw` を作ります。未確定なら、人の確定を待ちます
 
 ## 設定
 
@@ -189,6 +196,12 @@ kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前
 | `protected_dirs` | 塗る前の図面を置くフォルダ | `data/raw` |
 
 図枠の下辺ぜんぶが表題欄の図面（河川境界確定図など）向けに、プリセット `configs/bottom_strip.yaml` があります。
+
+## 開発の記録
+
+Yuki が方針を決め、Fable が設計し、Opus が実装しました。Opus は判断に迷うと `docs/questions.md` に書いて止まり、Yuki と Fable が答えます。
+作業の規約は [`CLAUDE.md`](CLAUDE.md)、設計は [`docs/design.md`](docs/design.md)、判断の記録は [`docs/questions.md`](docs/questions.md) にあります。
+日々の進み具合は [`docs/progress.md`](docs/progress.md)、精度の記録は [`docs/accuracy_log.md`](docs/accuracy_log.md) にあります。
 
 ## 精度の推移
 
@@ -208,6 +221,10 @@ kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前
 
 **上の伸びのすべてがエンジンの改善ではありません。** 太字の「図面」「指標」の行では、ダミー図面や指標の定義も変わっていて、前の行とは直接比べられません。塗りすぎ率を従来の定義で測ると、最新は 23.03% です。地番生存率は目標に届いていません（線と重なる注記を除くと 100%）。
 
+## 利用上の注意
+
+地番は公開データにある情報で、個人情報には当たらないと考えています。ただし、台帳図面を AI に渡すことの扱いは、発注者ごとに異なります。**使うときは、発注者の承諾を得てください。**
+
 ## 既知の制約
 
 **黒子筆は、塗り漏れをゼロにする保証はしません。確認画面での人の確認を、手順に含めてください。**
@@ -215,7 +232,6 @@ kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前
 - 精度はダミー図面で測った値です。実物のスキャン図面と手書きの図面では測っていません
 - OCR が文字として検出しなかった部分は塗られません。確認画面で人が足してください
 - 1桁の地番は検出されにくく、地番と分からないまま塗られることがあります
-- 確定済みの図面に `mask` を実行すると、確定の結果が自動の塗りで上書きされます
 - 照合は実験段階です。図郭線の自動検出はまだなく、上の 1.2 m はダミーの正解データの図郭線を使った値です。縮尺の誤差は1枚ずつ ±0.9% ほど残ります
 - ハイフンが落ちた地番の読み替えは、単体テストでだけ確かめています
 - Windows で自動確認しているのは、インストール、OCR、塗り、採点までです。確認画面と MCP は Windows で確かめていません
@@ -223,7 +239,9 @@ kurokofude eval --truth <正解.json> --result <.chiban.json> --image <塗る前
 
 ## 出典
 
-図面は、法務省 登記所備付地図データ（G空間情報センター）を加工して作成しました。
+図面は、法務省 登記所備付地図データ（[G空間情報センター](https://front.geospatial.jp/)）を加工して作成しました。データの案内は[法務省のページ](https://www.moj.go.jp/MINJI/minji05_00494.html)にあります。
+
+[登記所備付地図データ利用規約](https://www.geospatial.jp/ckan/dataset/fc3b0593-ce9e-40d1-aa33-94382d5f0da1/resource/47871bf1-4c85-48f7-a8fe-b27c6643c1c5/download/license.pdf)に沿って加工し、再配布しています。加工は作者が行ったもので、国や法務省が作成したものではありません。
 
 **図面に描かれた氏名は、すべて架空のものです。**
 

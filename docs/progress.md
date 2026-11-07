@@ -61,3 +61,7 @@
 2026-11-05 できた：デモ用の比較画像 tools/georef/compare.py（照合前 43.2 m／照合後 1.4 m の PNG 2枚、横並びの docs/georef_before_after.png、1秒ずつの GIF）。README の「できること」に貼った。正解の .tfw で重ねると線が全面で一致することを見て、描き方と向きを確かめた。
 2026-11-05 確認：照合後は筆界線と図面の線がほぼ重なるが、拡大すると同じ向きに 1〜2 m ほど離れている（ずれ 1.4 m のとおり）。本線のコードは変更なし。
 2026-11-05 未了：対話の Claude Code での3場面の通し確認、README の Mermaid の表示確認。
+2026-11-07 できた：Fable の赤入れ（docs/fable_review_1106.md）の README の項目（開発の記録、デモ動画の行、例文、出典、利用上の注意、活用業務）。mask と batch は確定済みの図面を --force なしでは上書きしない。mask_drawing は確定済みを拒否し、force の引数を持たない。pytest 268 件成功。
+2026-11-07 未了：デモ動画の URL を README に入れる。出典の書き方は Yuki の判断待ち（questions.md Q16）。
+2026-11-07 確認：docs/submission*.md と docs/script_v2.md は触っていない。
+
