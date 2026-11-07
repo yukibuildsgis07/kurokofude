@@ -147,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--truth-out", type=Path, default=Path("data") / "truth")
     parser.add_argument("--ref-out", type=Path, default=Path("data") / "ref")
     parser.add_argument("--count", type=int, default=5)
+    parser.add_argument("--only", help="この名前の図面だけ書き出す（例 dummy_002）。ほかの図面は同じ順番で飛ばす")
     parser.add_argument("--seed", type=int, default=20261102)
     parser.add_argument("--name", default="dummy", help="ファイル名の接頭辞。--count 1 ならそのまま使う")
     parser.add_argument("--crop", type=int, nargs=2, metavar=("W", "H"), help="図郭の一部だけを描く")
@@ -168,6 +169,10 @@ def main(argv: list[str] | None = None) -> int:
         sheet = pick_sheet(data, rng, source_cfg, chiban_re)
         if sheet is None:
             continue
+        name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
+        if args.only and name != args.only:  # 図郭の選び方は順番で決まるので、飛ばす図面も数える
+            made += 1
+            continue
         parcels = [data.parcels[p] for p in sheet.parcel_ids if p in data.parcels]
         drawable = [p for p in parcels if chiban_re.fullmatch(p.chiban)]
         crop = tuple(args.crop) if args.crop else None
@@ -179,7 +184,6 @@ def main(argv: list[str] | None = None) -> int:
             {p.chiban for p in parcels},
         )
         rendered = render_sheet(sheet, parcels, drawable, cfg, font_path, seed=args.seed + made, crop=crop)
-        name = args.name if args.count == 1 else f"{args.name}_{made + 1:03d}"
         write_outputs(args.out, args.truth_out, args.ref_out, name, rendered, sheet, data, chiban_re)
         height, width = rendered.image.shape[:2]
         kinds = Counter(label.placement for label in rendered.labels)

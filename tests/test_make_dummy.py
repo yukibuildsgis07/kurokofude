@@ -298,3 +298,29 @@ def test_fixture_truth_has_title_lines_and_frame():
 def test_config_uses_only_plane_coordinate_system_8():
     config = yaml.safe_load((ROOT / "tools" / "make_dummy" / "config.yaml").read_text(encoding="utf-8"))
     assert config["source"]["coordinate_system"] == "公共座標8系"
+
+
+def test_only_writes_one_drawing_and_keeps_the_order(tmp_path, monkeypatch):
+    """--only は指定の図面だけ書き、ほかは同じ順番で飛ばす（図郭の選び方は順番で決まるため）。"""
+    import make
+
+    written, seeds = [], []
+    map_data = moj_xml.parse_map(XML)
+    monkeypatch.setattr(make, "iter_map_sources", lambda *_args: iter([XML, XML, XML]))
+    monkeypatch.setattr(make, "find_font_path", lambda *_args: Path("font"))
+    monkeypatch.setattr(make, "pick_sheet", lambda *_args: map_data.sheets[0])
+    monkeypatch.setattr(make, "write_outputs", lambda _out, _truth, _ref, name, *_args: written.append(name))
+
+    class Fake:
+        image = np.zeros((2, 2, 3), dtype=np.uint8)
+        labels = []
+
+    def fake_render(*_args, seed, crop):
+        seeds.append(seed)
+        return Fake
+
+    monkeypatch.setattr(make, "render_sheet", fake_render)
+    assert make.main(["--source", str(tmp_path), "--out", str(tmp_path), "--count", "3", "--only", "dummy_002", "--seed", "100"]) == 0
+    assert written == ["dummy_002"]
+    assert seeds == [101]  # 2枚目のシードで描く
+
