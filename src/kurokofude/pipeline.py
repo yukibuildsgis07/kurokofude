@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .refine import refine_lone_text, refine_pair, refine_unpaired, tight_box
 
 
 FRAME_CORNERS = 4
+RESULT_SUFFIX = ".chiban.json"
 
 
 @dataclass
@@ -44,7 +46,20 @@ def frame_from_config(config: dict) -> list | None:
     return [[float(x), float(y)] for x, y in frame]
 
 
-def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path) -> MaskSummary:
+class ConfirmedError(RuntimeError):
+    """人が確定した図面を、force なしで上書きしようとした（§19）。"""
+
+
+def is_confirmed(in_path: Path, out_dir: Path) -> bool:
+    result_path = Path(out_dir) / f"{Path(in_path).stem}{RESULT_SUFFIX}"
+    if not result_path.is_file():
+        return False
+    return bool(json.loads(result_path.read_text(encoding="utf-8")).get("confirmed"))
+
+
+def mask_file(in_path: Path, config: dict, out_dir: Path, cache_dir: Path, force: bool = False) -> MaskSummary:
+    if not force and is_confirmed(in_path, out_dir):
+        raise ConfirmedError("確定済みの図面です")
     ocr_cfg = {**config["ocr"], "title_keep_words": config.get("title_keep_words", [])}
     boxes = run_ocr(in_path, ocr_cfg, cache_dir)
     classified = classify_boxes(boxes, image_size_of(in_path), config)

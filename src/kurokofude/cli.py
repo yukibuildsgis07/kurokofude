@@ -14,12 +14,13 @@ import cv2
 from .config import load_config
 from .evaluate import average_scores, evaluate
 from .ocr import read_image_for_ocr
-from .pipeline import MaskSummary, mask_file
+from .pipeline import ConfirmedError, MaskSummary, mask_file
 
 DEFAULT_OUT_DIR = Path("data") / "masked"
 DEFAULT_CACHE_DIR = Path("data") / "cache"
 TIFF_SUFFIXES = {".tif", ".tiff"}
 TRUTH_SUFFIX = ".truth.json"
+CONFIRMED_MESSAGE = "確定済みなので上書きしません。確定の結果を消して塗り直すときは --force を付けてください"
 
 
 def _print_summary(summary: MaskSummary, elapsed: float) -> None:
@@ -31,7 +32,11 @@ def _print_summary(summary: MaskSummary, elapsed: float) -> None:
 
 def cmd_mask(args: argparse.Namespace) -> int:
     started = time.perf_counter()
-    summary = mask_file(args.input, load_config(args.config), args.out, args.cache)
+    try:
+        summary = mask_file(args.input, load_config(args.config), args.out, args.cache, force=args.force)
+    except ConfirmedError:
+        print(f"{args.input.name}: {CONFIRMED_MESSAGE}", file=sys.stderr)
+        return 1
     _print_summary(summary, time.perf_counter() - started)
     return 0
 
@@ -40,17 +45,21 @@ def cmd_batch(args: argparse.Namespace) -> int:
     """フォルダ直下の TIFF を順に塗る。1枚失敗しても残りは続ける。"""
     config = load_config(args.config)
     paths = sorted(p for p in args.input.iterdir() if p.suffix.lower() in TIFF_SUFFIXES)
-    failed = 0
+    failed = skipped = 0
     for path in paths:
         started = time.perf_counter()
         try:
-            summary = mask_file(path, config, args.out, args.cache)
+            summary = mask_file(path, config, args.out, args.cache, force=args.force)
+        except ConfirmedError:
+            skipped += 1
+            print(f"{path.name}: {CONFIRMED_MESSAGE}", file=sys.stderr)
+            continue
         except Exception as exc:  # 1枚の失敗で全体を止めない
             failed += 1
             print(f"{path.name}: 失敗（{type(exc).__name__}）", file=sys.stderr)
             continue
         _print_summary(summary, time.perf_counter() - started)
-    print(f"{len(paths) - failed}/{len(paths)} 枚を処理しました")
+    print(f"{len(paths) - failed - skipped}/{len(paths)} 枚を処理しました" + (f"（確定済みで飛ばした {skipped} 枚）" if skipped else ""))
     return 1 if failed else 0
 
 
@@ -104,6 +113,7 @@ def _add_mask_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--force", action="store_true", help="確定済みの図面も上書きする（確定の結果は消える）")
 
 
 def build_parser() -> argparse.ArgumentParser:

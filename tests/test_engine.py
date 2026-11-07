@@ -885,6 +885,60 @@ def test_mask_file_splits_mixed_box_and_paints_only_name_side(tmp_path, monkeypa
 # batch
 
 
+def confirmed_project(tmp_path, monkeypatch):
+    """確定済みの結果が out にある状態を作る。OCR は呼ばない。"""
+    from kurokofude import pipeline
+
+    source = tmp_path / "a.tif"
+    tifffile.imwrite(source, np.full((700, 1000, 3), 240, dtype=np.uint8), photometric="rgb")
+    monkeypatch.setattr(pipeline, "run_ocr", lambda *_args: [box(rect(300, 300, 60, 20), "12-3"), box(rect(300, 326, 90, 18))])
+    out = tmp_path / "out"
+    pipeline.mask_file(source, CONFIG, out, tmp_path / "cache")
+    result_path = out / "a.chiban.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["confirmed"] = True
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    return source, out, result_path
+
+
+def test_mask_refuses_confirmed_drawing_without_force(tmp_path, monkeypatch):
+    from kurokofude import pipeline
+
+    source, out, result_path = confirmed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(pipeline, "run_ocr", lambda *_args: pytest.fail("確定済みなら OCR の前に止まるはず"))
+    with pytest.raises(pipeline.ConfirmedError):
+        pipeline.mask_file(source, CONFIG, out, tmp_path / "cache")
+    assert json.loads(result_path.read_text(encoding="utf-8"))["confirmed"] is True
+
+
+def test_mask_overwrites_confirmed_drawing_with_force(tmp_path, monkeypatch):
+    from kurokofude import pipeline
+
+    source, out, result_path = confirmed_project(tmp_path, monkeypatch)
+    pipeline.mask_file(source, CONFIG, out, tmp_path / "cache", force=True)
+    assert "confirmed" not in json.loads(result_path.read_text(encoding="utf-8"))
+
+
+def test_cli_mask_stops_with_message_and_force_goes_through(tmp_path, monkeypatch, capsys):
+    from kurokofude import cli
+
+    source, out, result_path = confirmed_project(tmp_path, monkeypatch)
+    arguments = ["mask", str(source), "--out", str(out), "--cache", str(tmp_path / "cache")]
+    assert cli.main(arguments) == 1
+    assert "--force" in capsys.readouterr().err
+    assert cli.main([*arguments, "--force"]) == 0
+    assert "confirmed" not in json.loads(result_path.read_text(encoding="utf-8"))
+
+
+def test_batch_skips_confirmed_drawing_and_succeeds(tmp_path, monkeypatch, capsys):
+    from kurokofude import cli
+
+    source, out, result_path = confirmed_project(tmp_path, monkeypatch)
+    assert cli.main(["batch", str(tmp_path), "--out", str(out), "--cache", str(tmp_path / "cache")]) == 0
+    assert "飛ばした 1 枚" in capsys.readouterr().out
+    assert json.loads(result_path.read_text(encoding="utf-8"))["confirmed"] is True
+
+
 def test_batch_continues_after_failure_and_reports_it(tmp_path, monkeypatch, capsys):
     from kurokofude import cli
     from kurokofude.pipeline import MaskSummary
@@ -893,7 +947,7 @@ def test_batch_continues_after_failure_and_reports_it(tmp_path, monkeypatch, cap
         (tmp_path / name).write_bytes(b"")
     seen = []
 
-    def fake_mask_file(path, _config, out_dir, _cache):
+    def fake_mask_file(path, _config, out_dir, _cache, force=False):
         seen.append(path.name)
         if path.name == "b.tif":
             raise ValueError("壊れた図面")

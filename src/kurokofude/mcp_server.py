@@ -13,7 +13,7 @@ from pathlib import Path
 from mcp.server.mcpserver import MCPServer
 
 from .config import DEFAULT_CONFIG_PATH, load_config
-from .pipeline import mask_file
+from .pipeline import ConfirmedError, mask_file
 from .review import app as review
 
 PROJECT_ROOT = DEFAULT_CONFIG_PATH.parents[1]
@@ -146,6 +146,8 @@ def do_mask_drawing(path: str, config: str | None = None, root: Path = PROJECT_R
     raw = _check_raw_drawing(path, settings, root)
     try:
         summary = mask_file(raw, settings, root / MASKED_DIR, root / CACHE_DIR)
+    except ConfirmedError:
+        raise GateError("人が確定済みの図面です。塗り直しません。そのまま list_masked と照合に進めます") from None
     except Exception as exc:  # 例外のメッセージにはパスが入りうるので、種類だけ返す
         raise GateError(f"塗りに失敗しました（{type(exc).__name__}）") from None
     masked = summary.out_path.resolve()

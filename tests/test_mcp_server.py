@@ -111,6 +111,21 @@ def test_config_accepts_only_presets_in_configs(project, preset):
         mcp_server.do_mask_drawing("data/raw/zumen.tif", preset, root=project)
 
 
+def test_mask_drawing_refuses_confirmed_drawing_and_has_no_force(project):
+    """人の確定を Claude が消せない。force の引数も持たせない（§19）。"""
+    mcp_server.do_mask_drawing("data/raw/zumen.tif", root=project)
+    result_path = project / "data" / "masked" / "zumen.chiban.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["confirmed"] = True
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    with pytest.raises(mcp_server.GateError, match="確定済み") as caught:
+        mcp_server.do_mask_drawing("data/raw/zumen.tif", root=project)
+    assert "raw" not in str(caught.value)
+    assert json.loads(result_path.read_text(encoding="utf-8"))["confirmed"] is True
+    tool = next(t for t in anyio.run(mcp_server.server.list_tools) if t.name == "mask_drawing")
+    assert "force" not in tool.input_schema["properties"]
+
+
 def test_mask_failure_hides_details(project, monkeypatch):
     def broken(*_args):
         raise RuntimeError(f"cannot open {project / 'data' / 'raw' / 'zumen.tif'}")
