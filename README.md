@@ -2,7 +2,7 @@
   <img src="docs/logo/kurokofude_logo_dark.png" alt="黒子筆 KUROKOFUDE AIに図面を渡す前の関所" width="600">
 </p>
 
-<p align="center">デモ動画：（11/7 に URL を入れる）</p>
+<p align="center">デモ動画：<a href="https://youtu.be/oI3ZnmbFMFk">https://youtu.be/oI3ZnmbFMFk</a></p>
 
 [![test](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/test.yml)
 [![windows-smoke](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml/badge.svg)](https://github.com/yukibuildsgis07/kurokofude/actions/workflows/windows-smoke.yml)
